@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "kontinuum-core"
 version = "0.1.0"
-authors = [{name = "Chance-Konstruktion", email = "deine@email.de"}]
+authors = [{name = "Chance-Konstruktion", email = "introareback@gmail.com"}]
 description = "Neuro-inspired learning engine for anomaly detection"
 readme = "README.md"
 license = {text = "AGPL-3.0"}
