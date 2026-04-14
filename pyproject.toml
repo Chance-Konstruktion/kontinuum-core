@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kontinuum-core"
+version = "0.1.0"
+authors = [{name = "Chance-Konstruktion", email = "deine@email.de"}]
+description = "Neuro-inspired learning engine for anomaly detection"
+readme = "README.md"
+license = {text = "AGPL-3.0"}
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU Affero General Public License v3",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/Chance-Konstruktion/kontinuum-core"
+Issues = "https://github.com/Chance-Konstruktion/kontinuum-core/issues"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
