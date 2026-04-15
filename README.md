@@ -2,6 +2,8 @@
 
 Pure Python learning engine extracted from [KONTINUUM](https://github.com/Chance-Konstruktion/ha-kontinuum).
 
+Looking for a lighter variant? See [KONTINUUM Lite](https://github.com/Chance-Konstruktion/kontinuum-lite).
+
 ## Installation
 
 ```bash
