@@ -1,8 +1,11 @@
 # KONTINUUM Core
 
-Pure Python learning engine extracted from [KONTINUUM](https://github.com/Chance-Konstruktion/ha-kontinuum).
+Pure Python learning engine extracted from [KONTINUUM](https://github.com/Chance-Konstruktion/ha-kontinuum). No Home Assistant dependency — usable from any Python project.
 
-Looking for a lighter variant? See [KONTINUUM:lite](https://github.com/Chance-Konstruktion/ha-kontinuum-lite).
+> **Part of the 3-repo family:**
+> **kontinuum-core** (this repo, HA-free Python package on PyPI) ·
+> [`ha-kontinuum`](https://github.com/Chance-Konstruktion/ha-kontinuum) (full HA Pro integration with UI) ·
+> [`ha-kontinuum-lite`](https://github.com/Chance-Konstruktion/ha-kontinuum-lite) (slim HA integration, no UI)
 
 ## Installation
 
