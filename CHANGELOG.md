@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- `__version__` now reads `"0.1.1"` (matches `pyproject.toml`). Both HA
+  integrations pin `kontinuum-core>=0.1.1`; before this fix a runtime
+  introspection would still report the stale `0.1.0` literal.
+
+### Changed
+- `KontinuumEngine.__init__` now accepts the full roadmap contract:
+  `config: dict | None`, `scheduler: Scheduler | None`,
+  `storage_path: str | None`. The scheduler is wired into
+  `Metaplasticity` so hosts can opt-in to its 24 h adaptation loop
+  by passing a `Scheduler`-Protocol instance (e.g. the `HAScheduler`
+  shipped by both HA integrations).
+- `Metaplasticity` inside the engine now sees the full brain-module
+  dict (hippocampus, predictive, cerebellum, basal_ganglia, reticular,
+  accumbens, locus) instead of just hippocampus + predictive.
+
 ## 0.1.1 (2026-04-16)
 
 ### Fixed
