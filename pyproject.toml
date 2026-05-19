@@ -20,8 +20,15 @@ classifiers = [
 Homepage = "https://github.com/Chance-Konstruktion/kontinuum-core"
 Issues = "https://github.com/Chance-Konstruktion/kontinuum-core/issues"
 
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
