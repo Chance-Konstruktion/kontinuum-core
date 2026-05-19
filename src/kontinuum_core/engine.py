@@ -35,6 +35,7 @@ from .nucleus_accumbens import NucleusAccumbens
 from .predictive_processing import PredictiveProcessing
 from .prefrontal_cortex import PrefrontalCortex
 from .reticular import Reticular
+from .scheduler import Scheduler
 from .sleep_consolidation import SleepConsolidation
 from .spatial_cortex import SpatialCortex
 from .thalamus import Thalamus
@@ -55,9 +56,26 @@ class EngineSnapshot:
 
 
 class KontinuumEngine:
-    """Neuro-inspired learning engine. HA-free."""
+    """Neuro-inspired learning engine. HA-free.
 
-    def __init__(self):
+    Args:
+        config: Optional configuration dict (reserved for future use).
+        scheduler: Optional :class:`Scheduler` instance. When provided it is
+            wired into :class:`Metaplasticity` so periodic parameter updates
+            can be activated via ``metaplasticity.start()``. When omitted,
+            metaplasticity stays inert (still queryable, no scheduling).
+        storage_path: Optional directory for persistent state of
+            sub-modules that opt-in (currently Metaplasticity only).
+    """
+
+    def __init__(
+        self,
+        config: Optional[Dict[str, Any]] = None,
+        scheduler: Optional[Scheduler] = None,
+        storage_path: Optional[str] = None,
+    ):
+        self.config = config or {}
+        self.scheduler = scheduler
         self.thalamus = Thalamus()
         self.hippocampus = Hippocampus()
         self.predictive = PredictiveProcessing()
@@ -65,12 +83,6 @@ class KontinuumEngine:
         self.basal_ganglia = BasalGanglia()
         self.neurorhythms = Neurorhythms()
         self.sleep_consolidation = SleepConsolidation()
-        self.metaplasticity = Metaplasticity(
-            brain_modules={
-                "hippocampus": self.hippocampus,
-                "predictive": self.predictive,
-            }
-        )
         self.amygdala = Amygdala()
         self.insula = Insula()
         self.hypothalamus = Hypothalamus()
@@ -81,6 +93,19 @@ class KontinuumEngine:
         self.locus_coeruleus = LocusCoeruleus()
         self.nucleus_accumbens = NucleusAccumbens()
         self.reticular = Reticular()
+        self.metaplasticity = Metaplasticity(
+            storage_path=storage_path,
+            scheduler=scheduler,
+            brain_modules={
+                "hippocampus": self.hippocampus,
+                "predictive": self.predictive,
+                "cerebellum": self.cerebellum,
+                "basal_ganglia": self.basal_ganglia,
+                "reticular": self.reticular,
+                "accumbens": self.nucleus_accumbens,
+                "locus": self.locus_coeruleus,
+            },
+        )
         self.tick_count = 0
 
     # ------------------------------------------------------------------
