@@ -2,7 +2,35 @@
 
 ## 0.1.2 (Unreleased)
 
+### Prediction & anomaly quality
+
+- **Adaptive anomaly threshold:** anomalies are now flagged relative to the
+  home's own surprise distribution (baseline + 2σ of the last 100 surprises,
+  clamped to [0.55, 0.95]) instead of a fixed `0.7`. A chaotic home raises
+  the bar, a very predictable one lowers it. Falls back to `0.7` until
+  30 samples exist (`PredictiveProcessing.anomaly_threshold()`).
+- **Confidence-calibrated misses:** an unpredicted token is no longer
+  automatic maximum surprise. The miss surprise scales with the model's own
+  confidence — full surprise only when a high-confidence prediction was
+  wrong; cold-start misses are moderate. Kills the "everything is an
+  anomaly on day one" failure mode.
+- **Probability shrinkage (Hippocampus):** transition probabilities use
+  `count / (total + 1)` instead of `count / total`, so a 2-out-of-2 pattern
+  claims 0.67 instead of 1.0. Vanishes for large samples.
+- **Evidence combination (Hippocampus):** predictions supported by multiple
+  n-gram orders / neighbor buckets now accumulate their evidence
+  (`Σ prob × weight`) instead of taking only the best single source —
+  agreement across orders raises confidence.
+- **Cerebellum confidence recovery:** rule successes slowly restore
+  confidence (×1.02, capped 0.99); previously only failures moved it
+  (×0.95), permanently burying rules after one bad streak.
+
 ### Fixed
+- `PredictiveProcessing.from_dict` now converts token-familiarity keys back
+  to `int`. After a JSON persistence round-trip the keys were strings, so
+  every familiarity lookup missed and novelty silently reset on restart.
+- `Hippocampus._apply_decay` prunes entries below 0.05 and drops empty
+  n-grams/buckets — micro-weights no longer accumulate unbounded over months.
 - `__version__` now reads `"0.1.1"` then `"0.1.2"` (matches `pyproject.toml`
   again after the 0.1.0 → 0.1.1 typo). Both HA integrations pin
   `kontinuum-core>=0.1.1`; before this fix a runtime introspection

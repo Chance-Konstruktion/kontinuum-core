@@ -55,3 +55,23 @@ def test_to_dict_from_dict_round_trip():
     fresh.from_dict(blob)
     assert fresh.rules == c.rules
     assert fresh.chunks == c.chunks
+
+
+def test_record_outcome_confidence_recovers_on_success():
+    """Failures degrade confidence; successes let it recover (capped at
+    0.99) so one bad streak doesn't permanently bury a good rule."""
+    from kontinuum_core.cerebellum import Cerebellum, CerebellumRule
+
+    c = Cerebellum()
+    c.rules["1_2"] = CerebellumRule(trigger=1, target=2, confidence=0.9)
+
+    for _ in range(5):
+        c.record_outcome("1_2", success=False)
+    degraded = c.rules["1_2"].confidence
+    assert degraded < 0.9
+
+    for _ in range(50):
+        c.record_outcome("1_2", success=True)
+    recovered = c.rules["1_2"].confidence
+    assert recovered > degraded
+    assert recovered <= 0.99

@@ -36,6 +36,21 @@ NOVELTY_DECAY = 0.995         # Wie schnell verliert ein neues Token seine Neuhe
 MIN_LEARN_WEIGHT = 0.2
 MAX_LEARN_WEIGHT = 2.5
 
+# Adaptiver Anomalie-Schwellwert (statt fixer Konstante):
+# Schwelle = Baseline + ANOMALY_STD_FACTOR × Streuung der letzten Surprises,
+# geklemmt auf [ANOMALY_MIN_THRESHOLD, ANOMALY_MAX_THRESHOLD].
+ANOMALY_STD_FACTOR = 2.0
+ANOMALY_MIN_THRESHOLD = 0.55
+ANOMALY_MAX_THRESHOLD = 0.95
+ANOMALY_DEFAULT_THRESHOLD = 0.7
+ANOMALY_MIN_SAMPLES = 30
+
+# Kalibrierung des Vorhersage-Fehlers bei nicht vorhergesagten Tokens:
+# Ein Miss zählt nur dann als volle Überraschung, wenn das Modell selbst
+# zuversichtlich war. Im Cold Start (keine/unsichere Vorhersagen) ist
+# "nicht vorhergesagt" der Normalfall und kein starkes Signal.
+UNPREDICTED_BASE_SURPRISE = 0.6
+
 
 class PredictiveProcessing:
     """Berechnet Surprise-Signale für jedes Event."""
@@ -71,7 +86,17 @@ class PredictiveProcessing:
 
         # ── Komponente 1: Vorhersage-Fehler ──
         # War dieses Token in den Vorhersagen?
-        prediction_surprise = 1.0  # Default: nicht vorhergesagt = maximale Überraschung
+        # Kalibriert nach Modell-Zuversicht: Ein Miss bei einem unsicheren
+        # Modell (Cold Start) ist weniger überraschend als ein Miss bei
+        # einem Modell, das eine hochkonfidente Vorhersage hatte.
+        model_conf = 0.0
+        for pred in predictions or []:
+            if len(pred) > 2 and pred[2] > model_conf:
+                model_conf = pred[2]
+        prediction_surprise = (
+            UNPREDICTED_BASE_SURPRISE
+            + (1.0 - UNPREDICTED_BASE_SURPRISE) * model_conf
+        )
 
         if predictions:
             for pred in predictions:
@@ -107,8 +132,6 @@ class PredictiveProcessing:
         surprise = max(0.0, min(1.0, surprise))
 
         # ── Baseline-Anpassung (was ist "normal"?) ──
-        # Surprise relativ zur Baseline bewerten
-        relative_surprise = surprise - self.baseline_surprise
         # Baseline nachführen
         self.baseline_surprise = (
             SURPRISE_EMA_ALPHA * surprise
@@ -142,6 +165,23 @@ class PredictiveProcessing:
         """Gibt das aktuelle Lerngewicht zurück (0.2 - 2.5)."""
         return self.learn_weight
 
+    def anomaly_threshold(self) -> float:
+        """Adaptiver Anomalie-Schwellwert.
+
+        Statt eines fixen Werts wird die Schwelle aus dem eigenen
+        Surprise-Niveau des Zuhauses abgeleitet: Baseline + k×Streuung
+        der letzten Surprise-Werte. Ein lautes/chaotisches Zuhause
+        hebt die Schwelle, ein sehr vorhersagbares senkt sie.
+        Vor ANOMALY_MIN_SAMPLES Beobachtungen gilt der Default.
+        """
+        n = len(self.surprise_history)
+        if n < ANOMALY_MIN_SAMPLES:
+            return ANOMALY_DEFAULT_THRESHOLD
+        mean = sum(self.surprise_history) / n
+        var = sum((s - mean) ** 2 for s in self.surprise_history) / n
+        threshold = mean + ANOMALY_STD_FACTOR * (var ** 0.5)
+        return max(ANOMALY_MIN_THRESHOLD, min(ANOMALY_MAX_THRESHOLD, threshold))
+
     def get_average_surprise(self) -> float:
         """Durchschnittliches Surprise-Level der letzten 100 Events."""
         if not self.surprise_history:
@@ -164,6 +204,7 @@ class PredictiveProcessing:
             "current_surprise": round(self.current_surprise, 3),
             "baseline_surprise": round(self.baseline_surprise, 3),
             "learn_weight": round(self.learn_weight, 3),
+            "anomaly_threshold": round(self.anomaly_threshold(), 3),
             "average_surprise": round(self.get_average_surprise(), 3),
             "total_events": self.total_events,
             "total_surprises": self.total_surprises,
@@ -190,4 +231,8 @@ class PredictiveProcessing:
         self.total_surprises = data.get("total_surprises", 0)
         self.total_expected = data.get("total_expected", 0)
         self.max_surprise = data.get("max_surprise", 0.0)
-        self._token_familiarity = data.get("token_familiarity", {})
+        # JSON-Roundtrip macht aus int-Keys Strings → zurückkonvertieren,
+        # sonst greift die Novelty-Erkennung nach einem Neustart ins Leere.
+        self._token_familiarity = {
+            int(k): v for k, v in data.get("token_familiarity", {}).items()
+        }

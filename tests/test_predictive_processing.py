@@ -16,13 +16,21 @@ def test_initial_state():
     assert 0.0 < p.baseline_surprise < 1.0
 
 
-def test_unpredicted_token_yields_high_surprise():
-    """No matching prediction → maximum prediction-error component."""
+def test_unpredicted_token_confidence_calibrated():
+    """Miss surprise scales with model confidence: a miss against a
+    high-confidence prediction is near-maximal, a miss with no/weak
+    predictions (cold start) is only moderately surprising."""
     p = PredictiveProcessing()
-    s = p.compute_surprise(token_id=42, predictions=[])
-    # 70% prediction (1.0) + 30% novelty (1.0) → ~1.0 capped.
-    assert s >= 0.9
+    cold = p.compute_surprise(token_id=42, predictions=[])
+    assert 0.6 <= cold < 0.9  # not max surprise anymore
     assert p.total_events == 1
+
+    p2 = PredictiveProcessing()
+    confident_miss = p2.compute_surprise(
+        token_id=42, predictions=[(7, 0.9, 1.0, "x", 100)]
+    )
+    assert confident_miss >= 0.9
+    assert confident_miss > cold
 
 
 def test_perfectly_predicted_token_yields_low_surprise():
@@ -90,3 +98,51 @@ def test_to_dict_round_trip_preserves_persistent_state():
     assert fresh.baseline_surprise == p.baseline_surprise
     assert fresh.max_surprise == p.max_surprise
     assert fresh._token_familiarity == p._token_familiarity
+
+
+def test_from_dict_converts_familiarity_keys_to_int():
+    """JSON round-trips stringify dict keys; from_dict must restore int
+    keys or familiarity lookups silently miss after a restart."""
+    import json
+
+    p = PredictiveProcessing()
+    for _ in range(10):
+        p.compute_surprise(token_id=5, predictions=[])
+
+    json_state = json.loads(json.dumps(p.to_dict()))
+    fresh = PredictiveProcessing()
+    fresh.from_dict(json_state)
+    assert 5 in fresh._token_familiarity
+    # And novelty actually continues to drop instead of resetting.
+    before = fresh.compute_surprise(token_id=5, predictions=[])
+    new = PredictiveProcessing().compute_surprise(token_id=5, predictions=[])
+    assert before < new
+
+
+def test_anomaly_threshold_default_then_adaptive():
+    """Below ANOMALY_MIN_SAMPLES the default applies; afterwards the
+    threshold adapts to the home's own surprise distribution and stays
+    within the documented clamp range."""
+    from kontinuum_core.predictive_processing import (
+        ANOMALY_DEFAULT_THRESHOLD,
+        ANOMALY_MAX_THRESHOLD,
+        ANOMALY_MIN_THRESHOLD,
+    )
+
+    p = PredictiveProcessing()
+    assert p.anomaly_threshold() == ANOMALY_DEFAULT_THRESHOLD
+
+    # Very predictable home: every event matches the top prediction.
+    for _ in range(120):
+        p.compute_surprise(token_id=1, predictions=[(1, 1.0, 1.0, "x", 120)])
+    quiet = p.anomaly_threshold()
+    assert ANOMALY_MIN_THRESHOLD <= quiet <= ANOMALY_MAX_THRESHOLD
+
+    # Chaotic home: constant misses against confident predictions.
+    p2 = PredictiveProcessing()
+    for i in range(120):
+        p2.compute_surprise(token_id=i, predictions=[(99999, 0.9, 1.0, "x", 100)])
+    noisy = p2.anomaly_threshold()
+    assert ANOMALY_MIN_THRESHOLD <= noisy <= ANOMALY_MAX_THRESHOLD
+    # A predictable home must end up with a lower threshold than a chaotic one.
+    assert quiet < noisy

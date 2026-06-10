@@ -155,13 +155,16 @@ class KontinuumEngine:
         )
 
         predictions = self.hippocampus.predict(ctx, top_k=5)
+        # Adaptive Schwelle VOR compute_surprise bestimmen, damit das
+        # aktuelle Event seine eigene Bewertungsgrundlage nicht verschiebt.
+        anomaly_threshold = self.predictive.anomaly_threshold()
         surprise = self.predictive.compute_surprise(token_id, predictions)
         learn_weight = self.predictive.get_learn_weight()
         self.hippocampus.learn(token_id, ctx, timestamp, learn_weight=learn_weight)
 
         return self._snapshot(
             surprise=surprise,
-            anomaly=surprise >= ANOMALY_THRESHOLD,
+            anomaly=surprise >= anomaly_threshold,
             token_id=token_id,
             token=token,
             predictions=predictions,

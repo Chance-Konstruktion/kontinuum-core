@@ -337,10 +337,19 @@ class Cerebellum:
         rule.last_fired = time.time()
     
     def record_outcome(self, rule_key: str, success: bool):
-        """Zeichnet Erfolg/Misserfolg einer Regel auf."""
+        """Zeichnet Erfolg/Misserfolg einer Regel auf.
+
+        Misserfolge senken die Konfidenz (×0.95); Erfolge lassen sie
+        langsam wieder erholen (×1.02, gedeckelt). Ohne Erholung würde
+        eine Regel nach einer Pechsträhne dauerhaft degradiert bleiben,
+        selbst wenn sie danach zuverlässig feuert.
+        """
         if rule_key in self.rules:
             if success:
                 self.rules[rule_key].successes += 1
+                self.rules[rule_key].confidence = min(
+                    0.99, self.rules[rule_key].confidence * 1.02
+                )
             else:
                 self.rules[rule_key].failures += 1
                 self.rules[rule_key].confidence *= 0.95
