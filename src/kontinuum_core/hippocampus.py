@@ -249,10 +249,11 @@ class Hippocampus:
 
         results = []
         for token_id, data in scores.items():
-            # Konfidenz: prob × weight + Bonus für viele Beobachtungen
+            # Konfidenz: kombinierte Evidenz aller Quellen (v0.16.0)
+            # + Bonus für viele Beobachtungen
             n_obs = data["n_obs"]
             obs_bonus = min(n_obs / 100.0, 0.3)  # Bis zu +0.3 für >100 Beobachtungen
-            conf = min(data["prob"] * data["weight"] * 2 + obs_bonus, 1.0)
+            conf = min(data["evidence"] * 2 + obs_bonus, 1.0)
             if conf >= 0.20:  # Höhere Schwelle = weniger Rauschen
                 results.append((token_id, round(data["prob"], 4),
                                 round(conf, 4), data["source"],
@@ -270,9 +271,22 @@ class Hippocampus:
 
         return results[:top_k]
     
+    # Laplace-artiges Shrinkage: count/(total + SMOOTHING) statt count/total.
+    # Verhindert Überkonfidenz bei winzigen Stichproben (2/2 → 0.67 statt 1.0);
+    # bei großen Stichproben verschwindet der Effekt.
+    PROB_SMOOTHING = 1.0
+
     def _score_predictions(self, seq: list, bucket: int) -> dict:
-        """Berechnet Vorhersage-Scores mit Stichprobengröße."""
-        scores = defaultdict(lambda: {"prob": 0, "weight": 0, "source": "", "n_obs": 0})
+        """Berechnet Vorhersage-Scores mit Stichprobengröße.
+
+        v0.16.0: Evidenz-Kombination statt Maximum. Ein Token, das von
+        mehreren N-Gram-Ordnungen (und/oder Nachbar-Buckets) gestützt wird,
+        sammelt die Evidenz aller Quellen ("evidence" = Σ prob × weight).
+        prob/source/n_obs stammen weiterhin von der stärksten Einzelquelle.
+        """
+        scores = defaultdict(lambda: {
+            "prob": 0, "weight": 0, "source": "", "n_obs": 0, "evidence": 0.0,
+        })
         neighbors = self._neighbor_buckets(bucket)
 
         for n in self.NGRAM_SIZES:
@@ -296,15 +310,15 @@ class Hippocampus:
                     continue
 
                 for token_id, count in self.transitions[bk][ngram].items():
-                    prob = (count / total) * discount
+                    prob = (count / (total + self.PROB_SMOOTHING)) * discount
                     eff_weight = w * discount
-                    if prob * eff_weight > scores[token_id]["prob"] * scores[token_id]["weight"]:
-                        scores[token_id] = {
-                            "prob": prob,
-                            "weight": eff_weight,
-                            "source": f"{n}-gram(n={total:.0f})",
-                            "n_obs": int(total),
-                        }
+                    entry = scores[token_id]
+                    entry["evidence"] += prob * eff_weight
+                    if prob * eff_weight > entry["prob"] * entry["weight"]:
+                        entry["prob"] = prob
+                        entry["weight"] = eff_weight
+                        entry["source"] = f"{n}-gram(n={total:.0f})"
+                        entry["n_obs"] = int(total)
 
         return scores
     
@@ -357,15 +371,30 @@ class Hippocampus:
             surviving.append((pred_ts, pred_tok, pred_conf))
         self.shadow_predictions = surviving
     
+    # Unterhalb dieses Gewichts wird ein Eintrag beim Decay entfernt –
+    # sonst sammeln sich über Monate Mikro-Gewichte ohne Vorhersagewert an.
+    DECAY_PRUNE_THRESHOLD = 0.05
+
     def _apply_decay(self, days: int):
-        """Exponentieller Decay."""
+        """Exponentieller Decay mit Pruning vergessener Einträge."""
         factor = self.DECAY_RATE ** days
-        for bucket in self.transitions:
-            for ngram in self.transitions[bucket]:
-                for token in self.transitions[bucket][ngram]:
-                    self.transitions[bucket][ngram][token] *= factor
-            for ngram in self.totals[bucket]:
-                self.totals[bucket][ngram] *= factor
+        for bucket in list(self.transitions):
+            trans = self.transitions[bucket]
+            tots = self.totals[bucket]
+            for ngram in list(trans):
+                targets = trans[ngram]
+                for token in list(targets):
+                    targets[token] *= factor
+                    if targets[token] < self.DECAY_PRUNE_THRESHOLD:
+                        del targets[token]
+                if ngram in tots:
+                    tots[ngram] *= factor
+                if not targets:
+                    del trans[ngram]
+                    tots.pop(ngram, None)
+            if not trans:
+                del self.transitions[bucket]
+                self.totals.pop(bucket, None)
     
     def to_dict(self) -> dict:
         trans = {}
