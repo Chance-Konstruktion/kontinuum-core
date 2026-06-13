@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.2 (Unreleased)
+## 0.1.2 (2026-06-13)
 
 ### Engine wiring — all 18 modules now influence the decision
 
