@@ -223,6 +223,11 @@ class PredictiveProcessing:
             "total_expected": self.total_expected,
             "max_surprise": self.max_surprise,
             "token_familiarity": dict(self._token_familiarity),
+            # Ohne die Surprise-Historie würde anomaly_threshold() nach jedem
+            # Neustart für ANOMALY_MIN_SAMPLES Events auf den Default (0.7)
+            # zurückfallen – die adaptive Schwelle (und average_surprise)
+            # vergäße das gelernte Surprise-Niveau des Zuhauses.
+            "surprise_history": list(self.surprise_history),
         }
 
     def from_dict(self, data: dict):
@@ -236,3 +241,7 @@ class PredictiveProcessing:
         self._token_familiarity = {
             int(k): v for k, v in data.get("token_familiarity", {}).items()
         }
+        # Adaptive Anomalie-Schwelle über den Neustart hinweg erhalten.
+        self.surprise_history = deque(
+            (float(s) for s in data.get("surprise_history", [])), maxlen=100
+        )
