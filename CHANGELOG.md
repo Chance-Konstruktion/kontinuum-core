@@ -2,6 +2,45 @@
 
 ## 0.1.2 (Unreleased)
 
+### Engine wiring — all 18 modules now influence the decision
+
+- **Full neuro-pipeline in `KontinuumEngine.observe()`:** the engine
+  instantiated 18 modules but its pipeline only ever drove 6 (thalamus,
+  hypothalamus, insula, hippocampus, predictive, metaplasticity). The other
+  twelve were dead weight for any standalone / `ha-kontinuum-lite` user. The
+  observe path now drives the proven wiring from the full integration:
+  - **Locus Coeruleus** arousal (event density) → modulates ranking and the
+    Reticular burst filter (`reticular.set_arousal_source(locus)`).
+  - **Neurorhythms** register every surprise and modulate the learning rate
+    (circadian rhythm + dopamine bursts) before the hippocampus learns.
+  - **Basal ganglia** passively observe each event (Q-values) and re-rank
+    predictions by Go/NoGo priority.
+  - **Cerebellum** checks for a fired reflex rule each event, injects a
+    confident reflex as a top prediction, and compiles new rules out of
+    hippocampus memory every 50 events.
+  - **Nucleus accumbens** habit-bias and **entorhinal** next-room
+    anticipation feed the ranking.
+  - **Anterior cingulate** scores the conflict between the module votes; its
+    `cognitive_control` (EMA of conflict + error rate) damps ranking
+    confidence by up to 25% on the *next* event — a genuinely closed control
+    loop (previously the ACC output was consumed nowhere).
+  - **Prefrontal cortex** turns the ranked candidates into an advisory
+    `Decision`. The core stays in `SHADOW` mode: it recommends, never acts.
+  - **Amygdala** risk assessment runs inside the PFC evaluation.
+- **`KontinuumEngine.feedback(positive)`** closes the reward loops a pure
+  `observe()` stream cannot: a host that executed (or saw the user
+  accept/override) the last decision calls it to teach basal ganglia
+  (TD Q-update + habits), nucleus accumbens (habit bias), neurorhythms
+  (dopamine burst/dip), the cerebellum rule that fired, and the ACC error
+  monitor. Without it these outcome modules only observe.
+- **`snapshot.extra`** now surfaces the rich signals that used to be
+  discarded: `anomaly_threshold`, `arousal`, `cognitive_control`,
+  `conflict_level`, `dopamine`, `expected_next_room`, the fired `reflex` and
+  the advisory `decision`.
+- **`KontinuumEngine.to_dict()` / `from_dict()`** serialize the full engine
+  state (all 17 stateful modules + room/anticipation wiring), so the
+  now-active modules survive a restart instead of cold-starting.
+
 ### Prediction & anomaly quality
 
 - **Adaptive anomaly threshold:** anomalies are now flagged relative to the
@@ -29,6 +68,11 @@
 - `PredictiveProcessing.from_dict` now converts token-familiarity keys back
   to `int`. After a JSON persistence round-trip the keys were strings, so
   every familiarity lookup missed and novelty silently reset on restart.
+- `PredictiveProcessing` now persists `surprise_history`. It was omitted from
+  `to_dict`, so after every restart the adaptive anomaly threshold (and
+  `average_surprise`) fell back to the fixed `0.7` default for the first
+  30 events before re-learning the home's surprise level. The threshold now
+  survives the restart.
 - `Hippocampus._apply_decay` prunes entries below 0.05 and drops empty
   n-grams/buckets — micro-weights no longer accumulate unbounded over months.
 - `__version__` now reads `"0.1.1"` then `"0.1.2"` (matches `pyproject.toml`
@@ -55,7 +99,11 @@
   - `test_predictive_processing.py` (7) — surprise + learn_weight.
   - `test_hippocampus.py` (6) — n-gram memory.
   - `test_cerebellum.py` (6) — rule/chunk engine.
-  - Total: 37 tests, < 0.1 s wall.
+  - `test_engine_wiring.py` (10) — locks in that every decision module is
+    driven, the cognitive-control loop is closed, entorhinal anticipation
+    boosts the ranking, `feedback()` reaches the reward modules, and the
+    engine state (incl. `surprise_history`) round-trips.
+  - Total: 53 tests, < 0.2 s wall.
 - `[project.optional-dependencies].dev = ["pytest>=7"]` for
   `pip install -e ".[dev]"`.
 - `[tool.pytest.ini_options]` configures `testpaths = ["tests"]` and
