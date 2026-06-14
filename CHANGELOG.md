@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.2.0 (2026-06-14)
+
+### LLM data contract — `kontinuum_core.llm`
+
+KONTINUUM is the sub-symbolic engine; an LLM is the optional language/reasoning
+layer on top (the `cortex` multi-agent layer in `ha-kontinuum`). This release
+adds a first-class, HA-free, fully-tested **data contract** for that pairing, in
+both directions — so the model gets clean data and the engine safely consumes
+the reply.
+
+- **Engine → LLM:** `build_llm_context(engine)` exports a versioned, LLM-optimized
+  snapshot with **explicit 0–1 scales and their meaning**, the **anomaly/surprise
+  signal** (the payoff of 0.1.4 — previously the model was asked to judge
+  anomalies without being given the engine's own anomaly signal), the top-k
+  expected next events, and the learning maturity. `render_llm_context()` renders
+  it as compact, labeled prose — the recommended prompt payload. The export is
+  defensive: any unreadable field degrades to a safe default instead of raising.
+- **LLM → Engine:** `extract_json()` survives the sloppiness real models produce
+  (```json fences, prose around the JSON, embedded objects); `normalize_proposal()`
+  coerces the reply into a strict, validated schema (`priority` clamped to 0–100
+  from str/float, `veto` parsed from `true`/`"yes"`/`1`, nullish strings → `None`)
+  and flags unparseable replies with `valid=False` so callers never act on garbage.
+- 20 new unit tests (`tests/test_llm.py`). Exported from the package root.
+
+### Harder probe — concept-drift stress test
+
+- **`benchmarks/replay.py`** gains `run_drift_benchmark()`: train on routine A,
+  switch the world to routine B, and measure plasticity. The engine **detects**
+  the change (surprise spikes ~6.8× over baseline) and **re-adapts** (surprise
+  settles back below baseline within a few days). `tests/test_benchmark.py` gates
+  both the spike and the re-adaptation. The benchmark CLI now runs both probes.
+
 ## 0.1.4 (2026-06-14)
 
 ### Anomaly detection: the flag is now actually usable

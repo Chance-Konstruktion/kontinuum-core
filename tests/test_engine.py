@@ -45,8 +45,12 @@ def test_public_exports():
         "Observation",
         "Prediction",
         "MemoryState",
+        "build_llm_context",
+        "render_llm_context",
+        "extract_json",
+        "normalize_proposal",
     }
-    assert kontinuum_core.__version__ == "0.1.4"
+    assert kontinuum_core.__version__ == "0.2.0"
 
 
 def test_data_types_default_construct():
