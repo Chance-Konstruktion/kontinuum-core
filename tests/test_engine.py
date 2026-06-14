@@ -49,6 +49,9 @@ def test_public_exports():
         "render_llm_context",
         "extract_json",
         "normalize_proposal",
+        "HOME_PRIOR_PROMPT",
+        "parse_home_prior",
+        "seed_engine_from_prior",
     }
     assert kontinuum_core.__version__ == "0.3.0"
 

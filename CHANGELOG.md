@@ -2,6 +2,27 @@
 
 ## 0.3.0 (2026-06-14)
 
+### LLM-seeded priors — a day-1 head start (`kontinuum_core.priors`)
+
+The companion direction to the `llm` context export: instead of the engine
+describing itself *to* a model, a model now describes the home *to* the engine
+at setup, so KONTINUUM starts already expecting the household's rhythm instead
+of learning from a blank slate.
+
+- **`HOME_PRIOR_PROMPT`** — the instruction handed to the LLM ("describe this
+  home's typical routines as JSON").
+- **`parse_home_prior(reply)`** — validates/normalizes the reply (survives code
+  fences/prose, drops malformed events, derives rooms), `valid=False` on garbage.
+- **`seed_engine_from_prior(engine, prior, days=30)`** — replays the routines as
+  synthetic events through the normal `observe()` path, so the prior is learned
+  by the real machinery and naturally decays as real observations accumulate (a
+  wrong LLM guess self-corrects).
+- **Effect (measured):** on a seeded engine the household routine reads as
+  expected on day 1 (mean surprise ≈ 0.04) while an unseeded engine finds the
+  same events surprising (≈ 0.72) — and off-pattern events (kitchen at 03:00)
+  are still flagged (≈ 0.70). The engine discriminates routine vs. anomaly from
+  the first real event instead of after weeks. Gated in `tests/test_priors.py`.
+
 ### Reticular attention gate is now actually wired (noise suppression)
 
 A review of the Codex-contributed test suite surfaced that `KontinuumEngine`
