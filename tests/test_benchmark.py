@@ -7,7 +7,7 @@ real regressions (the engine going blind) rather than pinning exact numbers.
 """
 from __future__ import annotations
 
-from benchmarks.replay import run_benchmark
+from benchmarks.replay import run_benchmark, run_drift_benchmark
 
 
 def test_surprise_separates_anomalies_from_routine():
@@ -34,3 +34,23 @@ def test_anomaly_flag_has_usable_recall_when_converged():
     assert res.auc > 0.9, f"ranking separation regressed: AUC={res.auc:.3f}"
     assert res.recall >= 0.6, f"anomaly-flag recall regressed: {res.recall:.3f}"
     assert res.precision >= 0.85, f"too many false alarms: precision={res.precision:.3f}"
+
+
+def test_engine_detects_and_readapts_to_concept_drift():
+    """A harder probe than static separation: plasticity.
+
+    Train on routine A, switch the world to routine B. The engine must (a) be
+    clearly surprised right after the switch — it noticed the change — and
+    (b) re-learn B so surprise settles back down. Observed: 6.8x spike over
+    baseline, then back below baseline within a few days. Bounds leave headroom.
+    """
+    d = run_drift_benchmark(train_days=40, drift_days=20)
+    # (a) detection: the new routine is markedly more surprising at first.
+    assert d.spike > 2.5 * d.baseline, (
+        f"drift not detected: spike={d.spike:.3f} baseline={d.baseline:.3f}")
+    # (b) re-adaptation: surprise comes back down as B is learned...
+    assert d.adapted < 0.5 * d.spike, (
+        f"did not re-adapt: adapted={d.adapted:.3f} spike={d.spike:.3f}")
+    # ...all the way back to roughly the old steady state.
+    assert d.adapted <= d.baseline * 1.5, (
+        f"re-adaptation incomplete: adapted={d.adapted:.3f} baseline={d.baseline:.3f}")

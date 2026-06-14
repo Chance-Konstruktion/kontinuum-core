@@ -56,6 +56,22 @@ ANOMALIES: List[Tuple[int, int, str]] = [
     (14, 0, "bedroom"),   # bedroom is idle every afternoon
 ]
 
+# A *different* learnable routine, for the concept-drift stress test. The home's
+# schedule changes (e.g. a new resident / shift work): same sensors, new times
+# and room order. A good engine should be surprised right after the switch, then
+# re-learn the new routine and settle back down.
+ROUTINE_B: List[Tuple[int, int, str]] = [
+    (10, 0, "living"),
+    (10, 30, "kitchen"),
+    (13, 0, "bedroom"),
+    (15, 0, "bathroom"),
+    (16, 0, "hallway"),
+    (20, 0, "living"),
+    (23, 30, "kitchen"),
+    (1, 0, "bathroom"),
+    (2, 0, "bedroom"),
+]
+
 ROOMS = sorted({r for *_, r in ROUTINE})
 
 
@@ -172,13 +188,70 @@ def run_benchmark(train_days: int = 40, eval_days: int = 12,
     return res
 
 
+@dataclass
+class DriftResult:
+    baseline: float = 0.0   # steady-state mean surprise on the old routine
+    spike: float = 0.0      # mean surprise on the first day of the new routine
+    adapted: float = 0.0    # mean surprise on the last day of the new routine
+    per_day: List[float] = field(default_factory=list)
+
+    def report(self) -> str:
+        days = "  ".join(f"{s:.2f}" for s in self.per_day)
+        return (
+            "KONTINUUM Core — concept-drift stress test\n"
+            "------------------------------------------\n"
+            f"baseline surprise (old routine) : {self.baseline:.3f}\n"
+            f"spike     (1st day, new routine): {self.spike:.3f}\n"
+            f"adapted   (last day, new routine): {self.adapted:.3f}\n"
+            f"per-day mean surprise after switch: {days}\n"
+        )
+
+
+def _day_mean_surprise(engine, routine, day) -> float:
+    vals = []
+    for hh, mm, room in routine:
+        for snap in _emit(engine, room, day.replace(hour=hh, minute=mm)):
+            vals.append(snap.surprise)
+    return sum(vals) / len(vals) if vals else 0.0
+
+
+def run_drift_benchmark(train_days: int = 40, drift_days: int = 20,
+                        start: datetime | None = None) -> DriftResult:
+    """Train on routine A, switch to routine B, watch detection + re-adaptation."""
+    engine = _build_engine()
+    start = start or datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+
+    day = start
+    for _ in range(train_days):
+        for hh, mm, room in ROUTINE:
+            _emit(engine, room, day.replace(hour=hh, minute=mm))
+        day += timedelta(days=1)
+
+    # Steady-state baseline on the *old* routine (what "normal" feels like now).
+    baseline = _day_mean_surprise(engine, ROUTINE, day)
+    day += timedelta(days=1)
+
+    # Switch the world to routine B and watch surprise rise then re-settle.
+    per_day = []
+    for _ in range(drift_days):
+        per_day.append(_day_mean_surprise(engine, ROUTINE_B, day))
+        day += timedelta(days=1)
+
+    return DriftResult(
+        baseline=baseline, spike=per_day[0], adapted=per_day[-1], per_day=per_day,
+    )
+
+
 def main() -> int:
     res = run_benchmark()
     print(res.report())
-    if not (res.auc > 0.5):
-        print("FAIL: surprise does not separate anomalies from routine.")
+    drift = run_drift_benchmark()
+    print(drift.report())
+    ok = res.auc > 0.5 and drift.spike > drift.baseline and drift.adapted < drift.spike
+    if not ok:
+        print("FAIL: anomaly separation or drift adaptation collapsed.")
         return 1
-    print("OK: anomalies are more surprising than routine.")
+    print("OK: anomalies separate from routine; drift is detected and re-adapted.")
     return 0
 
 
