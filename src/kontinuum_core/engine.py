@@ -30,6 +30,7 @@ pruning) runs inline on a coarse cadence.
 from __future__ import annotations
 
 import time
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -60,6 +61,8 @@ from .thalamus import Thalamus
 COMPILE_EVERY = 50
 # Prune the entorhinal room map at most once per day.
 ENTORHINAL_PRUNE_SECONDS = 86400
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -508,6 +511,12 @@ class KontinuumEngine:
     # ------------------------------------------------------------------
     # Persistence
     # ------------------------------------------------------------------
+    # Bumped whenever the on-disk layout of to_dict() changes incompatibly.
+    # A restore from a *newer* schema than this build understands is refused
+    # (cold start) instead of silently loading a half-understood brain; an
+    # older/absent version is accepted and best-effort migrated forward.
+    SCHEMA_VERSION = 1
+
     # Modules whose state is round-tripped by to_dict/from_dict.
     _PERSISTED_MODULES = (
         "thalamus", "hippocampus", "predictive", "cerebellum", "basal_ganglia",
@@ -526,6 +535,7 @@ class KontinuumEngine:
             if callable(to_dict):
                 modules[name] = to_dict()
         return {
+            "schema_version": self.SCHEMA_VERSION,
             "tick_count": self.tick_count,
             "last_room": self._last_room,
             "expected_next_room": self._expected_next_room,
@@ -533,7 +543,23 @@ class KontinuumEngine:
         }
 
     def from_dict(self, data: Dict[str, Any]) -> None:
-        """Restore engine state previously produced by :meth:`to_dict`."""
+        """Restore engine state previously produced by :meth:`to_dict`.
+
+        A brain written by a *newer* schema than this build understands is
+        rejected (the engine cold-starts) rather than restored half-blind,
+        which could corrupt learning. Brains with an older or missing
+        ``schema_version`` (e.g. produced by kontinuum-core <= 0.1.2) are
+        treated as schema 1 and loaded as before.
+        """
+        # ``0`` covers the pre-versioning 0.1.2 layout, which is schema 1.
+        version = data.get("schema_version", self.SCHEMA_VERSION)
+        if version > self.SCHEMA_VERSION:
+            logger.warning(
+                "Refusing to restore brain: on-disk schema_version %s is newer "
+                "than this engine understands (%s). Cold-starting instead.",
+                version, self.SCHEMA_VERSION,
+            )
+            return
         self.tick_count = data.get("tick_count", 0)
         self._last_room = data.get("last_room")
         self._expected_next_room = data.get("expected_next_room")

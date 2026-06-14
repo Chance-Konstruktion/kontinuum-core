@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kontinuum-core"
-version = "0.1.2"
+version = "0.1.3"
 authors = [{name = "Chance-Konstruktion", email = "introareback@gmail.com"}]
 description = "Neuro-inspired learning engine for anomaly detection"
 readme = "README.md"
@@ -31,4 +31,4 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
