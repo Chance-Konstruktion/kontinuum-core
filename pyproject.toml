@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kontinuum-core"
-version = "0.3.1"
+version = "0.4.0"
 authors = [{name = "Chance-Konstruktion", email = "introareback@gmail.com"}]
 description = "Neuro-inspired learning engine for anomaly detection"
 readme = "README.md"

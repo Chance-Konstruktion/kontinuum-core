@@ -282,7 +282,7 @@ class KontinuumEngine:
         self._remember_decision(decision, fired_rule_key, bucket, room, timestamp)
 
         prev_event_ts = self._last_event_ts
-        self._maybe_maintain(timestamp)
+        self._maybe_maintain(timestamp, prev_event_ts)
         self._last_event_ts = time.time()
 
         return self._snapshot(
@@ -450,13 +450,22 @@ class KontinuumEngine:
             "rule_key": fired_rule_key,
         }
 
-    def _maybe_maintain(self, timestamp) -> None:
+    def _maybe_maintain(self, timestamp, prev_event_ts: float = 0.0) -> None:
         """Coarse-cadence background maintenance run inline on the event path."""
         if self.tick_count % COMPILE_EVERY == 0:
             self.cerebellum.compile_rules(self.hippocampus)
         now = time.time()
         if now - self.entorhinal_cortex.last_prune_ts > ENTORHINAL_PRUNE_SECONDS:
             self.entorhinal_cortex.prune_old_transitions()
+        # Sleep consolidation: during a quiet spell (≥30 min no events, ≥50
+        # events since last, ≤1×/h) replay/prune memory, dream-recombine,
+        # smooth Q-values and run synaptic homeostasis. Off in busy periods and
+        # in tight replays (wall-clock quiet check), so it never fights live use.
+        if self.sleep_consolidation.should_consolidate(prev_event_ts):
+            self.sleep_consolidation.consolidate(
+                self.hippocampus, self.cerebellum,
+                self.basal_ganglia, self.neurorhythms,
+            )
 
     # ------------------------------------------------------------------
     # State helpers
