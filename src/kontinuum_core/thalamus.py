@@ -465,18 +465,7 @@ class Thalamus:
             self.stats["tokens_filtered"] += 1
             return None
         self.entity_last_token[entity_id] = token
-        if token not in self.token_to_id:
-            if len(self.token_to_id) >= self.MAX_VOCAB_SIZE:
-                cutoff = self._next_id - int(self.MAX_VOCAB_SIZE * 0.9)
-                stale = [t for t, i in self.token_to_id.items() if i < cutoff]
-                for t in stale:
-                    old_id = self.token_to_id.pop(t)
-                    self.id_to_token.pop(old_id, None)
-                _LOGGER.debug("Vokabular beschnitten: %d Tokens entfernt", len(stale))
-            self.token_to_id[token] = self._next_id
-            self.id_to_token[self._next_id] = token
-            self._next_id += 1
-        token_id = self.token_to_id[token]
+        token_id = self.get_or_create_token(token)
         self.stats["events_processed"] += 1
         if not timestamp:
             timestamp = datetime.now(timezone.utc)
@@ -647,6 +636,24 @@ class Thalamus:
 
     def decode_token(self, token_id: int) -> str:
         return self.id_to_token.get(token_id, f"?{token_id}")
+
+    def get_or_create_token(self, token: str) -> int:
+        """Return the id for ``token``, minting a new one (with vocabulary
+        eviction) if unseen. Public so a host can tokenize synthetic events
+        (e.g. a suggested action) the same way ``process()`` does internally.
+        """
+        if token not in self.token_to_id:
+            if len(self.token_to_id) >= self.MAX_VOCAB_SIZE:
+                cutoff = self._next_id - int(self.MAX_VOCAB_SIZE * 0.9)
+                stale = [t for t, i in self.token_to_id.items() if i < cutoff]
+                for t in stale:
+                    old_id = self.token_to_id.pop(t)
+                    self.id_to_token.pop(old_id, None)
+                _LOGGER.debug("Vokabular beschnitten: %d Tokens entfernt", len(stale))
+            self.token_to_id[token] = self._next_id
+            self.id_to_token[self._next_id] = token
+            self._next_id += 1
+        return self.token_to_id[token]
 
     def resolve_entities(self, token: str) -> list:
         parts = token.split(".")

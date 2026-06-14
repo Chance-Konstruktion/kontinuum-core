@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.1 (2026-06-14)
+
+### Small APIs to support the ha-kontinuum cortex refactor
+
+Two additive, backward-compatible helpers so the Pro integration can adopt the
+LLM contract without rewriting its pipeline onto `KontinuumEngine`:
+
+- **`build_llm_context()` now also accepts a brain dict** (a mapping of module
+  instances), not just a `KontinuumEngine`. The Pro integration drives core
+  modules directly; it can now pass its `brain` dict straight in (key aliases
+  handled, e.g. `spatial` → `spatial_cortex`).
+- **`Thalamus.get_or_create_token(token)`** is now public — the token-minting
+  logic was extracted from `process()`. Hosts can tokenize synthetic events
+  (e.g. a suggested action) the same way the engine does. This is the API the
+  cortex bridge needed (it was calling a non-existent `get_or_create_token`).
+
 ## 0.4.0 (2026-06-14)
 
 ### Sleep consolidation is now wired and correct
