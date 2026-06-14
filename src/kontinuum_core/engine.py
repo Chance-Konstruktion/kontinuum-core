@@ -263,7 +263,7 @@ class KontinuumEngine:
             )
             predictions = [reflex_pred] + (predictions or [])
         if predictions:
-            predictions = self._rank_predictions(predictions, bucket, room)
+            predictions = self._rank_predictions(predictions, bucket, room, timestamp)
 
         # PFC decision (the amygdala risk assessment runs inside evaluate()).
         # Default operation mode is SHADOW: the core only *recommends*.
@@ -279,7 +279,7 @@ class KontinuumEngine:
             )
         )
 
-        self._remember_decision(decision, fired_rule_key, bucket, room)
+        self._remember_decision(decision, fired_rule_key, bucket, room, timestamp)
 
         prev_event_ts = self._last_event_ts
         self._maybe_maintain(timestamp)
@@ -348,7 +348,8 @@ class KontinuumEngine:
     # ------------------------------------------------------------------
     # Ranking / conflict helpers
     # ------------------------------------------------------------------
-    def _rank_predictions(self, predictions: List[Any], bucket: int, room: str) -> List[Any]:
+    def _rank_predictions(self, predictions: List[Any], bucket: int, room: str,
+                          timestamp=None) -> List[Any]:
         """Re-rank predictions by Go/NoGo priority, reward bias, arousal,
         cognitive control and next-room anticipation.
 
@@ -361,7 +362,10 @@ class KontinuumEngine:
         """
         mode = self.insula.current_mode
         arousal = self.locus_coeruleus.get_arousal()
-        hour = datetime.now(timezone.utc).hour
+        # Hour from the EVENT timestamp, not wall clock, so replayed / seeded
+        # streams key reward bias by the event's hour (else it lands in the
+        # wrong accumbens bucket during backfill and never matches at inference).
+        hour = (timestamp or datetime.now(timezone.utc)).hour
         state_key = f"{room}|{mode}|{hour}"
         arousal_boost = (arousal - 0.3) * 0.15  # -0.045 .. +0.105
         control = max(0.0, min(1.0, getattr(self.anterior_cingulate, "cognitive_control", 0.0)))
@@ -427,12 +431,15 @@ class KontinuumEngine:
             })
         return proposals
 
-    def _remember_decision(self, decision, fired_rule_key, bucket: int, room: str) -> None:
+    def _remember_decision(self, decision, fired_rule_key, bucket: int, room: str,
+                           timestamp=None) -> None:
         """Snapshot the active decision so feedback() can reinforce it."""
         if decision is None or not getattr(decision, "token", ""):
             self._last_decision_ctx = None
             return
-        hour = datetime.now(timezone.utc).hour
+        # Event-timestamp hour (see _rank_predictions) so the remembered
+        # state_key matches the one used at ranking time, incl. during replay.
+        hour = (timestamp or datetime.now(timezone.utc)).hour
         self._last_decision_ctx = {
             "token_id": decision.token_id,
             "token": decision.token,
@@ -532,7 +539,7 @@ class KontinuumEngine:
         "neurorhythms", "sleep_consolidation", "amygdala", "insula",
         "hypothalamus", "spatial_cortex", "prefrontal_cortex",
         "anterior_cingulate", "entorhinal_cortex", "locus_coeruleus",
-        "nucleus_accumbens", "reticular",
+        "nucleus_accumbens", "reticular", "metaplasticity",
     )
 
     def to_dict(self) -> Dict[str, Any]:
