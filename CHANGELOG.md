@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.1.3 (2026-06-14)
+
+### Persistence schema versioning
+
+- **`to_dict()` now stamps a `schema_version`** (currently `1`) into the
+  serialized brain. `from_dict()` refuses to restore a brain written by a
+  *newer* schema than the running engine understands — it logs a warning and
+  cold-starts instead of loading a half-understood state that could corrupt
+  learning. Brains with an older or missing version (anything written by
+  `kontinuum-core <= 0.1.2`) are treated as schema `1` and load exactly as
+  before, so the change is fully backward compatible.
+
+### Replay benchmark (offline evaluation)
+
+- **`benchmarks/replay.py`** — the first end-to-end "does it actually learn"
+  harness. It synthesises a learnable multi-room household routine, trains the
+  engine on it, then replays a held-out period with out-of-distribution events
+  injected (motion in the kitchen at 03:00, the bedroom at 14:00, …) and
+  reports how well the `surprise` signal separates anomalies from routine
+  (mean surprise, Mann-Whitney AUC, and precision/recall of the built-in
+  `anomaly` flag). Runs standalone (`python benchmarks/replay.py`, exits
+  non-zero if separation collapses) and is not shipped in the wheel.
+- **`tests/test_benchmark.py`** turns the harness into a regression guard
+  (asserts AUC stays well above chance). On the synthetic routine the surprise
+  signal separates anomalies at AUC ≈ 0.99.
+- **`tests/test_persistence_schema.py`** locks in the round-trip + version
+  guarantees above.
+
 ## 0.1.2 (2026-06-13)
 
 ### Engine wiring — all 18 modules now influence the decision

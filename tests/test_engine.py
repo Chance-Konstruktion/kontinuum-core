@@ -46,7 +46,7 @@ def test_public_exports():
         "Prediction",
         "MemoryState",
     }
-    assert kontinuum_core.__version__ == "0.1.2"
+    assert kontinuum_core.__version__ == "0.1.3"
 
 
 def test_data_types_default_construct():
