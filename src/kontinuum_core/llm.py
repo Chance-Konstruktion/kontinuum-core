@@ -23,7 +23,9 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Union
 
 # Bumped when the shape of build_llm_context() changes incompatibly.
@@ -36,6 +38,32 @@ PROPOSAL_FIELDS = ("agent", "action", "entity_id", "reason", "priority", "veto")
 # ===========================================================================
 # Engine → LLM : context export
 # ===========================================================================
+# Engine attribute -> candidate keys in ha-kontinuum's brain dict, so the
+# context export works whether handed a KontinuumEngine or that plain dict of
+# module instances (the Pro integration drives modules directly, not the engine).
+_BRAIN_KEYS = {
+    "predictive": ("predictive",),
+    "hippocampus": ("hippocampus",),
+    "thalamus": ("thalamus",),
+    "spatial_cortex": ("spatial_cortex", "spatial"),
+    "insula": ("insula",),
+    "hypothalamus": ("hypothalamus",),
+    "basal_ganglia": ("basal_ganglia",),
+    "cerebellum": ("cerebellum",),
+}
+
+
+def _as_engine_view(source):
+    """Normalize a KontinuumEngine OR a brain dict into an attribute view."""
+    if not isinstance(source, Mapping):
+        return source
+    view = SimpleNamespace()
+    for attr, keys in _BRAIN_KEYS.items():
+        setattr(view, attr, next((source[k] for k in keys if k in source), None))
+    view.tick_count = source.get("tick_count", 0)
+    return view
+
+
 def _maturity(events: int) -> str:
     if events < 100:
         return "cold_start"
@@ -79,9 +107,12 @@ def _expected_next(engine, top_k: int) -> List[Dict[str, Any]]:
 def build_llm_context(engine, *, top_k: int = 3) -> Dict[str, Any]:
     """Serialize the engine state into an LLM-optimized, versioned snapshot.
 
-    Defensive by design: any individual field that can't be read degrades to a
-    safe default rather than raising. The output is plain JSON-able data.
+    ``engine`` may be a :class:`KontinuumEngine` or a brain dict of module
+    instances (as the ha-kontinuum integration uses). Defensive by design: any
+    individual field that can't be read degrades to a safe default rather than
+    raising. The output is plain JSON-able data.
     """
+    engine = _as_engine_view(engine)
     pred = getattr(engine, "predictive", None)
     surprise = float(_safe(lambda: pred.current_surprise, 0.0) or 0.0)
     threshold = float(_safe(lambda: pred.anomaly_threshold(), 0.0) or 0.0)

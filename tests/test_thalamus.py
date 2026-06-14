@@ -4,6 +4,17 @@ from __future__ import annotations
 from kontinuum_core.thalamus import Thalamus
 
 
+def test_get_or_create_token_is_stable_and_mints_new():
+    t = Thalamus()
+    a = t.get_or_create_token("kitchen.light.on")
+    b = t.get_or_create_token("kitchen.light.on")  # same token -> same id
+    c = t.get_or_create_token("bedroom.motion.on")  # new token -> new id
+    assert a == b
+    assert a != c
+    assert t.decode_token(a) == "kitchen.light.on"
+    assert t.decode_token(c) == "bedroom.motion.on"
+
+
 def _register(t: Thalamus, entity_id: str, area: str = "bedroom") -> None:
     """Convenience: register an entity with all the bits Thalamus needs to
     actually emit a token (room must resolve, semantic must resolve)."""

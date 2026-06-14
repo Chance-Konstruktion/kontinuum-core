@@ -51,6 +51,25 @@ def test_context_has_versioned_schema_and_anomaly_signal():
     assert ctx["engine"]["events_seen"] > 0
 
 
+def test_build_llm_context_accepts_a_brain_dict():
+    """The Pro integration drives modules directly; context must work on its
+    brain dict (note the "spatial" key, not "spatial_cortex")."""
+    e = _warm_engine()
+    brain = {
+        "predictive": e.predictive, "hippocampus": e.hippocampus,
+        "thalamus": e.thalamus, "spatial": e.spatial_cortex,
+        "insula": e.insula, "hypothalamus": e.hypothalamus,
+        "basal_ganglia": e.basal_ganglia, "cerebellum": e.cerebellum,
+        "tick_count": e.tick_count,
+    }
+    from_brain = build_llm_context(brain)
+    from_engine = build_llm_context(e)
+    assert from_brain["schema_version"] == CONTEXT_SCHEMA_VERSION
+    assert from_brain["engine"]["events_seen"] == from_engine["engine"]["events_seen"]
+    assert from_brain["now"]["room"] == from_engine["now"]["room"]  # "spatial" mapped
+    assert from_brain["anomaly"]["surprise"] == from_engine["anomaly"]["surprise"]
+
+
 def test_context_never_raises_on_a_blank_engine():
     """A cold engine (no observations) must still produce a valid context."""
     ctx = build_llm_context(KontinuumEngine())
