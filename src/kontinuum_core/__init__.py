@@ -8,6 +8,11 @@ from .llm import (
     extract_json,
     normalize_proposal,
 )
+from .priors import (
+    HOME_PRIOR_PROMPT,
+    parse_home_prior,
+    seed_engine_from_prior,
+)
 
 __version__ = "0.3.0"
 __all__ = [
@@ -21,4 +26,8 @@ __all__ = [
     "render_llm_context",
     "extract_json",
     "normalize_proposal",
+    # LLM-seeded priors — day-1 head start.
+    "HOME_PRIOR_PROMPT",
+    "parse_home_prior",
+    "seed_engine_from_prior",
 ]
