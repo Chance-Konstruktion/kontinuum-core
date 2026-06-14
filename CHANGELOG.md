@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.1 (2026-06-14)
+
+### Foundation fixes (from an internal audit)
+
+- **Event-timestamp hour, not wall clock, in ranking/decision.**
+  `_rank_predictions`/`_remember_decision` keyed the nucleus-accumbens reward
+  bias by `datetime.now().hour`. During replay/backfill — including
+  `seed_engine_from_prior` — that put the bias in the *wall-clock* hour instead
+  of the *event's* hour, so seeded reward bias never matched at inference. Both
+  now derive the hour from the event timestamp threaded through `observe()`.
+- **Bounded growth of two fully-persisted maps that had no eviction:**
+  `Hippocampus.durations` (token-pair → recent durations) is now capped at
+  `MAX_DURATION_KEYS = 2000` (keeps the most-observed pairs), and
+  `NucleusAccumbens.values`/`success_counts` at `MAX_ENTRIES = 5000` (keeps the
+  strongest-bias entries). Prevents slow memory/persistence growth on long-lived
+  installs (Raspberry Pi).
+- **Metaplasticity is now included in engine persistence.** It was constructed
+  and updated but excluded from `_PERSISTED_MODULES`, so its state was lost on a
+  `to_dict`/`from_dict` round-trip.
+
 ## 0.3.0 (2026-06-14)
 
 ### LLM-seeded priors — a day-1 head start (`kontinuum_core.priors`)

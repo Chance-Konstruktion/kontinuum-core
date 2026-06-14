@@ -51,6 +51,9 @@ class Hippocampus:
     MIN_OBSERVATIONS = 2
     NGRAM_WEIGHTS = {1: 0.15, 2: 0.4, 3: 0.7, 4: 0.95}
     MAX_NGRAMS_PER_BUCKET = 1000
+    # Cap the number of duration token-pairs so this dict can't grow without
+    # bound (it is fully persisted). Each value list is already capped at 50.
+    MAX_DURATION_KEYS = 2000
     
     # Multi-Window Shadow Validation (v0.13.0)
     SHADOW_WINDOWS = [60, 300, 1800]  # 1min, 5min, 30min
@@ -220,7 +223,9 @@ class Hippocampus:
             durs.append(duration)
             if len(durs) > 50:
                 self.durations[dur_key] = durs[-50:]
-        
+            if len(self.durations) > self.MAX_DURATION_KEYS:
+                self._evict_durations()
+
         self.buffer.append(token_id)
     
     def _evict_bucket(self, bucket: int):
@@ -234,7 +239,13 @@ class Hippocampus:
             del trans[ngram]
             if ngram in tots:
                 del tots[ngram]
-    
+
+    def _evict_durations(self):
+        """Bound the duration map: keep the most-observed token-pairs."""
+        scored = sorted(self.durations.items(), key=lambda kv: len(kv[1]),
+                        reverse=True)[:self.MAX_DURATION_KEYS]
+        self.durations = defaultdict(list, dict(scored))
+
     def predict(self, ctx: list, top_k: int = 5) -> list:
         """
         Sagt die wahrscheinlichsten nächsten Events vorher.

@@ -53,7 +53,7 @@ def test_public_exports():
         "parse_home_prior",
         "seed_engine_from_prior",
     }
-    assert kontinuum_core.__version__ == "0.3.0"
+    assert kontinuum_core.__version__ == "0.3.1"
 
 
 def test_data_types_default_construct():

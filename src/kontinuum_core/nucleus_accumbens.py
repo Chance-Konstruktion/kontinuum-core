@@ -5,6 +5,9 @@ from __future__ import annotations
 
 class NucleusAccumbens:
     alpha = 0.2
+    # Cap stored (state, action) entries so this reward map (fully persisted)
+    # can't grow without bound across a long-lived install.
+    MAX_ENTRIES = 5000
 
     def __init__(self):
         self.values = {}
@@ -16,11 +19,23 @@ class NucleusAccumbens:
     def reinforce(self, state: str, action: str, reward: float) -> float:
         key = (state, action)
         old = self.values.get(key, 0.0)
-        new = old + self.alpha * (float(reward) - old)
-        self.values[key] = max(-1.0, min(1.5, new))
+        clamped = max(-1.0, min(1.5, old + self.alpha * (float(reward) - old)))
+        self.values[key] = clamped
         if reward > 0:
             self.success_counts[key] = self.success_counts.get(key, 0) + 1
-        return self.values[key]
+        if len(self.values) > self.MAX_ENTRIES:
+            self._evict()
+        # Return the computed value (the key may have been evicted just now).
+        return clamped
+
+    def _evict(self):
+        """Bound memory: keep the strongest-bias entries (largest |value|)."""
+        keep = {
+            k for k, _ in sorted(self.values.items(),
+                                 key=lambda kv: abs(kv[1]), reverse=True)[:self.MAX_ENTRIES]
+        }
+        self.values = {k: v for k, v in self.values.items() if k in keep}
+        self.success_counts = {k: v for k, v in self.success_counts.items() if k in keep}
 
     def to_dict(self) -> dict:
         return {
