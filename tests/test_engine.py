@@ -50,7 +50,7 @@ def test_public_exports():
         "extract_json",
         "normalize_proposal",
     }
-    assert kontinuum_core.__version__ == "0.2.0"
+    assert kontinuum_core.__version__ == "0.3.0"
 
 
 def test_data_types_default_construct():

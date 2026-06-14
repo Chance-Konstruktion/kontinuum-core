@@ -22,8 +22,12 @@ class ReticularFormation:
         """Connects the Locus Coeruleus for arousal-modulated filtering."""
         self._arousal_ref = locus_coeruleus
 
-    def should_process(self, entity_id: str, domain: str = "") -> bool:
-        now = time.time()
+    def should_process(self, entity_id: str, domain: str = "", now: float | None = None) -> bool:
+        # ``now`` defaults to wall clock, but callers should pass the *event*
+        # timestamp (epoch seconds) so bursts are judged by the real event rate,
+        # not by how fast events are replayed through the engine.
+        if now is None:
+            now = time.time()
         cooldown = self.cooldown_until.get(entity_id, 0.0)
         if cooldown > now:
             self.filtered_events += 1
@@ -31,7 +35,12 @@ class ReticularFormation:
 
         dq = self.event_times[entity_id]
         dq.append(now)
-        recent = [t for t in dq if now - t <= self.BURST_WINDOW]
+        # Only count events in the *past* window [now - BURST_WINDOW, now].
+        # Guarding the lower bound keeps the filter correct when event
+        # timestamps arrive out of order (replayed / multi-source streams),
+        # where a future-dated entry would otherwise satisfy ``now - t <= w``
+        # with a negative delta and inflate the burst count.
+        recent = [t for t in dq if 0.0 <= now - t <= self.BURST_WINDOW]
 
         domain_factor = 1
         if domain == "sensor":

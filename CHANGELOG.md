@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.3.0 (2026-06-14)
+
+### Reticular attention gate is now actually wired (noise suppression)
+
+A review of the Codex-contributed test suite surfaced that `KontinuumEngine`
+instantiated the `Reticular` burst filter but **never called `should_process()`**
+in `observe()` — the attention gate was dead code (documented by an `xfail`).
+
+- **`observe()` now routes every tracked event through the Reticular burst
+  filter.** Repetitive bursts of the *same* entity (a flapping contact, a chatty
+  power meter) are throttled — surplus events return `extra={"skipped":
+  "burst_filtered"}` and don't feed learning. This activates the existing,
+  already-persisted module; the `xfail` is now a passing regression test.
+- **Bugfix uncovered while wiring it:** the burst window counted events with
+  `now - t <= BURST_WINDOW`, which wrongly included *future-dated* entries
+  (negative delta) when timestamps arrive out of order — e.g. replayed or
+  multi-source streams. It now counts only the past window
+  `0 <= now - t <= BURST_WINDOW`. With wall-clock time (always monotonic) the
+  bug was invisible; it only appeared once `should_process()` was fed real event
+  timestamps. `should_process()` gained an optional `now` parameter so callers
+  pass the event time instead of wall clock.
+
 ## 0.2.0 (2026-06-14)
 
 ### LLM data contract — `kontinuum_core.llm`

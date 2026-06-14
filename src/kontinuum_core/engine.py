@@ -171,6 +171,15 @@ class KontinuumEngine:
         semantic = signal["semantic"]
         state = signal["state"]
 
+        # Reticular attention gate: drop repetitive bursts of the SAME entity so
+        # sensor noise (a flapping contact, a chatty power meter) doesn't flood
+        # learning. Judged by the *event* timestamp, not wall clock, so replayed
+        # / simulated streams are gated by real event rate, not replay speed.
+        ev_now = timestamp.timestamp() if hasattr(timestamp, "timestamp") else None
+        domain = entity_id.split(".")[0] if entity_id else ""
+        if not self.reticular.should_process(entity_id, domain=domain, now=ev_now):
+            return self._snapshot(extra={"skipped": "burst_filtered"})
+
         # Arousal + idle tracking (Locus Coeruleus feeds the Reticular gate;
         # Sleep counts events for the host-triggered consolidation cycle).
         self.locus_coeruleus.observe_event()
