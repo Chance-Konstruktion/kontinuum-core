@@ -99,30 +99,40 @@ class SleepConsolidation:
         }
 
         # ── Phase 1: Hippocampus Replay ──
-        # Schwache N-Gramme stärker vergessen, starke leicht verstärken
-        if hippocampus and hasattr(hippocampus, "ngram_counts"):
+        # Schwache Transitions stärker vergessen, starke leicht verstärken.
+        # Struktur: transitions[bucket][ngram][token_id] = weight, mit
+        # totals[bucket][ngram] = Σ weights — totals werden konsistent
+        # nachgezogen, damit predict() (count/(total+SMOOTHING)) korrekt bleibt.
+        if hippocampus and hasattr(hippocampus, "transitions"):
             pruned = 0
             reinforced = 0
 
-            for size_key, bucket_dict in hippocampus.ngram_counts.items():
-                for bucket, ngram_dict in bucket_dict.items():
+            for bucket, ngram_dict in hippocampus.transitions.items():
+                empty_ngrams = []
+                for ngram, token_counts in ngram_dict.items():
                     to_remove = []
-                    for ngram, count in ngram_dict.items():
+                    for tok, count in list(token_counts.items()):
                         if count < 1.5:
                             # Schwaches Muster → stärker vergessen
-                            new_count = count * (1.0 / DECAY_BOOST_FACTOR)
+                            new_count = count / DECAY_BOOST_FACTOR
                             if new_count < 0.3:
-                                to_remove.append(ngram)
+                                to_remove.append(tok)
                                 pruned += 1
                             else:
-                                ngram_dict[ngram] = new_count
+                                token_counts[tok] = new_count
                         elif count > 5.0:
                             # Starkes Muster → leicht verstärken (Replay)
-                            ngram_dict[ngram] = min(count * REINFORCE_FACTOR, count + 2.0)
+                            token_counts[tok] = min(count * REINFORCE_FACTOR, count + 2.0)
                             reinforced += 1
-
-                    for ngram in to_remove:
-                        del ngram_dict[ngram]
+                    for tok in to_remove:
+                        del token_counts[tok]
+                    if token_counts:
+                        hippocampus.totals[bucket][ngram] = sum(token_counts.values())
+                    else:
+                        empty_ngrams.append(ngram)
+                for ngram in empty_ngrams:
+                    del ngram_dict[ngram]
+                    hippocampus.totals[bucket].pop(ngram, None)
 
             stats["patterns_pruned"] = pruned
             stats["patterns_reinforced"] = reinforced
@@ -134,7 +144,7 @@ class SleepConsolidation:
         if cerebellum and hippocampus:
             try:
                 rules_before = len(getattr(cerebellum, "rules", {}))
-                cerebellum.extract_rules(hippocampus)
+                cerebellum.compile_rules(hippocampus)
                 rules_after = len(getattr(cerebellum, "rules", {}))
                 stats["rules_extracted"] = max(0, rules_after - rules_before)
                 self.last_rules_extracted = stats["rules_extracted"]
@@ -142,25 +152,23 @@ class SleepConsolidation:
                 _LOGGER.debug("Cerebellum rule extraction during consolidation failed", exc_info=True)
 
         # ── Phase 3: Basalganglien Q-Value Smoothing ──
-        # Extreme Q-Values leicht in Richtung Mittelwert ziehen
-        # (verhindert dass einzelne zufällige Belohnungen dominieren)
-        if basal_ganglia and hasattr(basal_ganglia, "q_table"):
+        # Extreme Q-Values leicht in Richtung Mittelwert ziehen (verhindert dass
+        # einzelne zufällige Belohnungen dominieren). Die LIVE-Pipeline nutzt den
+        # flachen q_values-Dict ("bucket:token" → float), nicht q_table.
+        if basal_ganglia and getattr(basal_ganglia, "q_values", None):
             smoothed = 0
-            q_table = basal_ganglia.q_table
-            if q_table:
-                all_values = [v for actions in q_table.values()
-                              for v in actions.values() if isinstance(v, (int, float))]
-                if all_values:
-                    mean_q = sum(all_values) / len(all_values)
-                    smooth_rate = 0.05  # 5% Richtung Mittelwert
-
-                    for state, actions in q_table.items():
-                        for action, q_val in actions.items():
-                            if isinstance(q_val, (int, float)):
-                                new_val = q_val + smooth_rate * (mean_q - q_val)
-                                if abs(new_val - q_val) > 0.001:
-                                    actions[action] = round(new_val, 6)
-                                    smoothed += 1
+            q_values = basal_ganglia.q_values
+            all_values = [v for v in q_values.values() if isinstance(v, (int, float))]
+            if all_values:
+                mean_q = sum(all_values) / len(all_values)
+                smooth_rate = 0.05  # 5% Richtung Mittelwert
+                for key in list(q_values.keys()):
+                    q_val = q_values[key]
+                    if isinstance(q_val, (int, float)):
+                        new_val = q_val + smooth_rate * (mean_q - q_val)
+                        if abs(new_val - q_val) > 0.001:
+                            q_values[key] = round(new_val, 6)
+                            smoothed += 1
 
             stats["q_values_smoothed"] = smoothed
 
@@ -240,6 +248,16 @@ class SleepConsolidation:
 
         stats["homeostasis_factor"] = round(homeostasis_factor, 3)
         self.last_homeostasis_factor = homeostasis_factor
+
+        # ── Final consistency pass ──
+        # totals[bucket][ngram] is a derived cache of Σ transition weights.
+        # Phase 4 (dream replay) boosts individual transitions directly, so
+        # rebuild totals once at the end to keep predict() (count/(total+k))
+        # exact regardless of which phase touched the weights.
+        if hippocampus and hasattr(hippocampus, "transitions"):
+            for bucket, ngram_dict in hippocampus.transitions.items():
+                for ngram, token_counts in ngram_dict.items():
+                    hippocampus.totals[bucket][ngram] = sum(token_counts.values())
 
         _LOGGER.info(
             "Sleep consolidation complete: pruned=%d, reinforced=%d, rules=%d, "

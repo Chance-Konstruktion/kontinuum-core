@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.4.0 (2026-06-14)
+
+### Sleep consolidation is now wired and correct
+
+A dormant subsystem, brought to life. `SleepConsolidation.consolidate()` was
+constructed and persisted but **never called** by the engine, and its body
+referenced attributes that don't exist (`hippocampus.ngram_counts`,
+`cerebellum.extract_rules`, `basal_ganglia.q_table`) — so it would have crashed
+the moment it ran.
+
+- **Wired into `_maybe_maintain()`**: during a genuine quiet spell (≥30 min
+  since the last event, ≥50 events since the last run, at most 1×/hour) the
+  engine now replays/prunes weak memories, reinforces strong ones, dream-
+  recombines patterns across contexts, smooths Q-values, and runs synaptic
+  homeostasis. It stays off during busy periods and tight replays (the quiet
+  check is wall-clock based), so it never fights live learning or the benchmark.
+- **Fixed the broken references**: Phase 1 now operates on the real
+  `hippocampus.transitions`/`totals`, Phase 2 calls `cerebellum.compile_rules`,
+  Phase 3 smooths the live flat `basal_ganglia.q_values`.
+- **Consistency guaranteed**: a final pass rebuilds `totals` from `transitions`
+  so `predict()` stays exact even after dream replay boosts individual weights
+  (a latent bug that left `totals` stale).
+- **Side effect fixed**: synaptic homeostasis now actually runs, so
+  `neurorhythms.total_synaptic_load` resets each cycle instead of growing
+  without bound (it was incremented every event and never reset).
+- New regression tests in `tests/test_consolidation.py`.
+
 ## 0.3.1 (2026-06-14)
 
 ### Foundation fixes (from an internal audit)
