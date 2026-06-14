@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.1.4 (2026-06-14)
+
+### Anomaly detection: the flag is now actually usable
+
+The replay benchmark added in 0.1.3 surfaced a real defect: the `surprise`
+signal separated anomalies almost perfectly (AUC ≈ 0.99), but the built-in
+`anomaly` flag fired on only **~6 % of injected anomalies** (recall 0.06).
+
+- **Root cause:** the adaptive threshold was `mean + 2·std` of recent
+  surprises, clamped to a floor of **0.55**. In a well-learned home, surprise
+  magnitudes are small (~0.07 for routine events), so the 0.55 floor sat far
+  above everything and the flag essentially never fired. The `mean + std`
+  estimator was also *non-robust*: the rare, loud anomalies inflated it,
+  raising the bar against the very events it should catch.
+- **Fix:** the threshold is now **robust and correctly scaled** —
+  `median + ANOMALY_MAD_FACTOR · 1.4826 · MAD` of the recent surprise history,
+  with the floor lowered to **0.10**. Median/MAD ignore the rare outliers and
+  estimate the *normal* surprise level; a noisy home still raises the bar via
+  the MAD term, a predictable home drops to the floor.
+- **Result (replay benchmark, converged):** anomaly-flag **recall 0.06 → 0.76**
+  at **precision 0.96** (F1 0.11 → 0.85). Surprise AUC unchanged at ≈ 0.99.
+- `tests/test_benchmark.py` now gates this with hard recall/precision floors so
+  it cannot silently regress. `ANOMALY_STD_FACTOR` is replaced by
+  `ANOMALY_MAD_FACTOR` (+ `MAD_TO_STD`).
+
+### Continuous-improvement mechanisms
+
+- **`tests.yaml`** gains a `benchmark` job that runs `benchmarks/replay.py` on
+  every push/PR — the quality metrics (mean surprise, AUC, P/R/F1) are now a
+  tracked, visible signal, and the job fails if anomaly separation collapses.
+- **`publish.yaml`** now also triggers on `v*` tag pushes (one-command
+  releases: `git tag v0.1.4 && git push origin v0.1.4`) and publishes with
+  `skip-existing: true`, so re-runs / double triggers are idempotent instead
+  of hard-failing on already-uploaded files.
+- **`.github/dependabot.yml`** keeps the SHA-pinned GitHub Actions current.
+
 ## 0.1.3 (2026-06-14)
 
 ### Persistence schema versioning

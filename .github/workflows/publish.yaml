@@ -3,6 +3,9 @@ name: Publish to PyPI
 on:
   release:
     types: [published]
+  # One-command releases: `git tag v0.1.4 && git push origin v0.1.4` publishes.
+  push:
+    tags: ["v*"]
   workflow_dispatch:
 
 jobs:
@@ -41,3 +44,7 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # Idempotent: re-runs / double triggers (tag + release) don't hard-fail
+          # when a file for this version was already uploaded.
+          skip-existing: true

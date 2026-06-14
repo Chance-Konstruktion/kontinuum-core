@@ -22,6 +22,7 @@ Performance: 1 Lookup + Arithmetik pro Event. ~0 ms.
 import logging
 import time
 from collections import deque
+from statistics import median
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -36,11 +37,23 @@ NOVELTY_DECAY = 0.995         # Wie schnell verliert ein neues Token seine Neuhe
 MIN_LEARN_WEIGHT = 0.2
 MAX_LEARN_WEIGHT = 2.5
 
-# Adaptiver Anomalie-Schwellwert (statt fixer Konstante):
-# Schwelle = Baseline + ANOMALY_STD_FACTOR × Streuung der letzten Surprises,
-# geklemmt auf [ANOMALY_MIN_THRESHOLD, ANOMALY_MAX_THRESHOLD].
-ANOMALY_STD_FACTOR = 2.0
-ANOMALY_MIN_THRESHOLD = 0.55
+# Adaptiver Anomalie-Schwellwert (robust gegen Kontamination):
+#   Schwelle = Median + ANOMALY_MAD_FACTOR × (MAD_TO_STD × MAD) der letzten
+#   Surprise-Werte, geklemmt auf [ANOMALY_MIN_THRESHOLD, ANOMALY_MAX_THRESHOLD].
+# Warum Median/MAD statt Mittelwert/Std: Anomalien sind selten und LAUT. In
+# einem Mittelwert+Std-Schätzer heben genau die Ausreißer, die wir flaggen
+# wollen, die Schwelle gegen sich selbst an → der Recall bricht ein. Median und
+# MAD (Median der absoluten Abweichungen) ignorieren die seltenen Spitzen und
+# schätzen das *normale* Surprise-Niveau des Zuhauses; MAD_TO_STD macht aus der
+# MAD einen konsistenten Std-Schätzer für normalverteilte Daten.
+ANOMALY_MAD_FACTOR = 3.0
+MAD_TO_STD = 1.4826
+# Untergrenze: in einem gut gelernten Zuhause sind Surprise-Werte klein
+# (~0.07 normal). Der alte Boden 0.55 lag weit darüber → der Anomalie-Flag
+# feuerte praktisch nie (Recall ~0.06 im Replay-Benchmark). 0.10 hält ein
+# Mindestsignal (kein Feuern auf Mikrorauschen), lässt aber echte
+# Kontextverletzungen durch.
+ANOMALY_MIN_THRESHOLD = 0.10
 ANOMALY_MAX_THRESHOLD = 0.95
 ANOMALY_DEFAULT_THRESHOLD = 0.7
 ANOMALY_MIN_SAMPLES = 30
@@ -166,20 +179,24 @@ class PredictiveProcessing:
         return self.learn_weight
 
     def anomaly_threshold(self) -> float:
-        """Adaptiver Anomalie-Schwellwert.
+        """Robust-adaptiver Anomalie-Schwellwert.
 
-        Statt eines fixen Werts wird die Schwelle aus dem eigenen
-        Surprise-Niveau des Zuhauses abgeleitet: Baseline + k×Streuung
-        der letzten Surprise-Werte. Ein lautes/chaotisches Zuhause
-        hebt die Schwelle, ein sehr vorhersagbares senkt sie.
-        Vor ANOMALY_MIN_SAMPLES Beobachtungen gilt der Default.
+        Die Schwelle wird aus dem eigenen Surprise-Niveau des Zuhauses
+        abgeleitet: ``Median + k × (MAD_TO_STD × MAD)`` der letzten
+        Surprise-Werte. Median und MAD sind robust gegen die seltenen,
+        lauten Anomalien – anders als Mittelwert+Std, den genau diese
+        Ausreißer nach oben verzerren (sie höben die Schwelle gegen sich
+        selbst an). Ein lautes/chaotisches Zuhause hebt die Schwelle, ein
+        sehr vorhersagbares senkt sie bis auf die Untergrenze. Vor
+        ANOMALY_MIN_SAMPLES Beobachtungen gilt der Default.
         """
         n = len(self.surprise_history)
         if n < ANOMALY_MIN_SAMPLES:
             return ANOMALY_DEFAULT_THRESHOLD
-        mean = sum(self.surprise_history) / n
-        var = sum((s - mean) ** 2 for s in self.surprise_history) / n
-        threshold = mean + ANOMALY_STD_FACTOR * (var ** 0.5)
+        data = list(self.surprise_history)
+        med = median(data)
+        mad = median([abs(x - med) for x in data])
+        threshold = med + ANOMALY_MAD_FACTOR * MAD_TO_STD * mad
         return max(ANOMALY_MIN_THRESHOLD, min(ANOMALY_MAX_THRESHOLD, threshold))
 
     def get_average_surprise(self) -> float:
