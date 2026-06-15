@@ -40,6 +40,12 @@ State is **persistent and bounded**: `engine.to_dict()` / `from_dict()`
 round-trip the full learned brain (with a `schema_version` guard), and the
 learned maps are capped — safe to run for years on a Raspberry Pi.
 
+Every `observe()` returns an `EngineSnapshot` with the live observability
+signals — `surprise` (0–1 prediction error) and the adaptive `anomaly` flag —
+which the HA integrations surface directly as entities (`sensor.kontinuum_surprise`,
+`binary_sensor.kontinuum_anomaly`, …). The engine stands on its own; any LLM is
+strictly an optional layer on top.
+
 ## LLM integration contract (`kontinuum_core.llm`)
 
 The engine is the sub-symbolic brain; an LLM is the optional language / reasoning
