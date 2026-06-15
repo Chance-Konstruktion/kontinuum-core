@@ -70,10 +70,13 @@ class SleepConsolidation:
 
         return True
 
-    def consolidate(self, hippocampus, cerebellum, basal_ganglia=None, neurorhythms=None):
+    def consolidate(self, hippocampus, cerebellum, basal_ganglia=None,
+                    neurorhythms=None, bdnf=None):
         """
         Führt die Konsolidierung durch:
         1. Hippocampus: Schwache Muster stärker vergessen, starke verstärken
+           (BDNF-geschützte, bewährte Muster werden nicht gelöscht, sondern
+           auf einem Mindestgewicht gehalten – Use-Dependent Protection)
         2. Dream Replay: Kreative Rekombination von Mustern über Kontexte
         3. Cerebellum: Regeln neu extrahieren aus aktuellem Wissen
         4. Basalganglien: Q-Values leicht in Richtung Mittelwert ziehen
@@ -106,6 +109,7 @@ class SleepConsolidation:
         if hippocampus and hasattr(hippocampus, "transitions"):
             pruned = 0
             reinforced = 0
+            protected = 0
 
             for bucket, ngram_dict in hippocampus.transitions.items():
                 empty_ngrams = []
@@ -116,8 +120,14 @@ class SleepConsolidation:
                             # Schwaches Muster → stärker vergessen
                             new_count = count / DECAY_BOOST_FACTOR
                             if new_count < 0.3:
-                                to_remove.append(tok)
-                                pruned += 1
+                                if bdnf is not None and bdnf.is_protected(tok):
+                                    # BDNF: bewährtes Muster nicht löschen,
+                                    # sondern auf Mindestgewicht halten.
+                                    token_counts[tok] = max(new_count, 0.5)
+                                    protected += 1
+                                else:
+                                    to_remove.append(tok)
+                                    pruned += 1
                             else:
                                 token_counts[tok] = new_count
                         elif count > 5.0:
@@ -136,6 +146,7 @@ class SleepConsolidation:
 
             stats["patterns_pruned"] = pruned
             stats["patterns_reinforced"] = reinforced
+            stats["patterns_protected"] = protected
             self.last_patterns_pruned = pruned
             self.last_patterns_reinforced = reinforced
 
@@ -248,6 +259,13 @@ class SleepConsolidation:
 
         stats["homeostasis_factor"] = round(homeostasis_factor, 3)
         self.last_homeostasis_factor = homeostasis_factor
+
+        # ── Phase 6: Neurotrophic decay (BDNF) ──
+        # Trophic support fades once per consolidation, so a routine that stops
+        # being used / rewarded eventually drops below the protection threshold
+        # and rejoins normal forgetting. Use stays protected; disuse lets go.
+        if bdnf is not None:
+            bdnf.decay_all()
 
         # ── Final consistency pass ──
         # totals[bucket][ngram] is a derived cache of Σ transition weights.

@@ -1,6 +1,6 @@
 """Main public API for KONTINUUM Core.
 
-The KontinuumEngine wires all 18 neuro-inspired modules into a single
+The KontinuumEngine wires all 25 neuro-inspired modules into a single
 pipeline. It is HA-free and can be used standalone or embedded in a
 host integration (ha-kontinuum, ha-kontinuum-lite).
 
@@ -14,12 +14,18 @@ Per-event pipeline (the modules that influence the decision):
     hippocampus.predict()     → top-k sequence predictions
     predictive.compute_surprise() + get_learn_weight()
     neurorhythms              → circadian/burst modulation of the rate
+    suprachiasmatic           → learned household circadian phase nudge
+    acetylcholine             → expected-uncertainty (context) rate damping
     hippocampus.learn(weight)
+    cortisol / serotonin      → slow stress / mood hormones (observe)
     basal_ganglia             → passive Q-observation + Go/NoGo re-ranking
     cerebellum                → reflex rule check + reflex injection
     nucleus_accumbens         → habit bias in the ranking
+    lateral_habenula          → anti-reward suppression of chronic rejects
+    cortisol.damping()        → conservative ranking under sustained stress
     anterior_cingulate        → conflict monitor → cognitive_control damping
     prefrontal_cortex.evaluate→ advisory Decision (SHADOW mode: never acts)
+    subthalamic_nucleus       → "hold your horses" brake under conflict
 
 Outcome learning (reward modules) is closed by the host via
 :meth:`KontinuumEngine.feedback`; without a host the reward modules only
@@ -35,11 +41,15 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from .acetylcholine import Acetylcholine
 from .amygdala import Amygdala
 from .anterior_cingulate import AnteriorCingulate
 from .basal_ganglia import BasalGanglia
+from .bdnf import Bdnf
 from .cerebellum import Cerebellum
+from .cortisol import Cortisol
 from .entorhinal_cortex import EntorhinalCortex
+from .habenula import LateralHabenula
 from .hippocampus import Hippocampus
 from .hypothalamus import Hypothalamus
 from .insula import Insula
@@ -48,11 +58,14 @@ from .metaplasticity import Metaplasticity
 from .neurorhythms import Neurorhythms
 from .nucleus_accumbens import NucleusAccumbens
 from .predictive_processing import PredictiveProcessing
-from .prefrontal_cortex import PrefrontalCortex
+from .prefrontal_cortex import Decision, PrefrontalCortex
 from .reticular import Reticular
 from .scheduler import Scheduler
+from .serotonin import Serotonin
 from .sleep_consolidation import SleepConsolidation
 from .spatial_cortex import SpatialCortex
+from .subthalamic_nucleus import SubthalamicNucleus
+from .suprachiasmatic import SuprachiasmaticNucleus
 from .thalamus import Thalamus
 
 # Compile cerebellum reflex rules out of hippocampus memory every N events.
@@ -117,6 +130,19 @@ class KontinuumEngine:
         self.reticular = Reticular()
         # Reticular filtering is arousal-modulated by the Locus Coeruleus.
         self.reticular.set_arousal_source(self.locus_coeruleus)
+
+        # --- Extended neuromodulator / region set (all O(1), Pi-friendly) ---
+        # Regions:
+        self.habenula = LateralHabenula()          # anti-reward (stop nagging)
+        self.subthalamic = SubthalamicNucleus()    # "hold your horses" brake
+        self.suprachiasmatic = SuprachiasmaticNucleus()  # learned inner clock
+        # Slow neuromodulators / hormones:
+        self.serotonin = Serotonin()               # mood / patience
+        self.acetylcholine = Acetylcholine()       # expected uncertainty
+        self.cortisol = Cortisol()                 # systemic stress hormone
+        # Neurotrophic maintenance ("vitamin" layer):
+        self.bdnf = Bdnf()                          # use-dependent protection
+
         self.metaplasticity = Metaplasticity(
             storage_path=storage_path,
             scheduler=scheduler,
@@ -139,6 +165,8 @@ class KontinuumEngine:
         # Snapshot of the most recent advisory decision so a host can close
         # the reward loops through feedback().
         self._last_decision_ctx: Optional[Dict[str, Any]] = None
+        # Last suprachiasmatic phase nudge, surfaced in the snapshot extra.
+        self._last_scn_gain: float = 1.0
 
     # ------------------------------------------------------------------
     # Entity registration
@@ -216,12 +244,17 @@ class KontinuumEngine:
             + list(self.insula.get_mode_context())
         )
 
+        # Context bucket is needed for the acetylcholine rate gate below, so
+        # derive it here (pure function of ctx) instead of after learning.
+        bucket = self.hippocampus._context_bucket(ctx)
+
         # Predict (pre-learn) → surprise → learn weight. The adaptive anomaly
         # threshold is read BEFORE compute_surprise so the current event does
         # not shift its own evaluation baseline.
         pre_predictions = self.hippocampus.predict(ctx, top_k=5)
         anomaly_threshold = self.predictive.anomaly_threshold()
         surprise = self.predictive.compute_surprise(token_id, pre_predictions)
+        anomaly_flag = surprise >= anomaly_threshold
         learn_weight = self.predictive.get_learn_weight()
 
         # Neurorhythms: register surprise + modulate the learning rate
@@ -229,10 +262,31 @@ class KontinuumEngine:
         self.neurorhythms.register_surprise(token_id, surprise)
         learn_weight = self.neurorhythms.modulate_learning(learn_weight)
 
-        # Hippocampus learns (weighted by surprise + rhythms).
+        # Suprachiasmatic nucleus: entrain to THIS home's activity rhythm and
+        # nudge the learning rate (±15%) toward the household's real day. Starts
+        # neutral (1.0) until warmed up, so it never fights the cold-start.
+        hour = timestamp.hour if hasattr(timestamp, "hour") else \
+            datetime.now(timezone.utc).hour
+        self.suprachiasmatic.observe(hour)
+        self._last_scn_gain = self.suprachiasmatic.phase_gain(hour)
+        learn_weight *= self._last_scn_gain
+
+        # Acetylcholine: read the bucket's *expected* uncertainty BEFORE folding
+        # in the current surprise, so a reliably-noisy context damps learning
+        # (we don't chase irreducible jitter) without the event judging itself.
+        learn_weight *= self.acetylcholine.learn_gain(bucket)
+        self.acetylcholine.observe(bucket, surprise)
+        learn_weight = max(0.05, min(10.0, learn_weight))
+
+        # Hippocampus learns (weighted by surprise + rhythms + clock + ACh).
         self.hippocampus.learn(token_id, ctx, timestamp, learn_weight=learn_weight)
 
-        bucket = self.hippocampus._context_bucket(ctx)
+        # Slow hormones observe every event (ranking-side effects only):
+        #   cortisol  – integrates sustained surprise/anomaly into stress,
+        #   serotonin – gentle mood dip on anomalies (recovers via feedback).
+        self.cortisol.observe(surprise, anomaly_flag)
+        self.serotonin.observe(anomaly_flag)
+
         # Basal ganglia passive observation (the home "wants" this state).
         self.basal_ganglia.process_observation(token_id, bucket)
 
@@ -279,6 +333,27 @@ class KontinuumEngine:
             )
         )
 
+        # Subthalamic nucleus "hold your horses": under high conflict + a thin
+        # margin between the top two candidates, recommend waiting instead of
+        # acting. Serotonin (patience) tunes how readily it holds. In SHADOW the
+        # decision is already OBSERVE, so this only ever brakes an actionable
+        # stage — a safety net, never a new action.
+        top_conf = predictions[0][2] if predictions else 0.0
+        runner_up = predictions[1][2] if predictions and len(predictions) > 1 else 0.0
+        stn_brake = self.subthalamic.compute_brake(
+            self.anterior_cingulate.conflict_level, top_conf, runner_up
+        )
+        stn_hold = False
+        if (decision is not None
+                and decision.stage in (Decision.SUGGEST, Decision.CONFIRM, Decision.EXECUTE)
+                and self.subthalamic.should_hold(self.serotonin.get_patience())):
+            stn_hold = True
+            decision.stage = Decision.OBSERVE
+            decision.reasons = list(decision.reasons or []) + [
+                f"STN-Hold: Konflikt {self.anterior_cingulate.conflict_level:.2f}, "
+                f"Marge {max(0.0, top_conf - runner_up):.2f}"
+            ]
+
         self._remember_decision(decision, fired_rule_key, bucket, room, timestamp)
 
         prev_event_ts = self._last_event_ts
@@ -287,13 +362,13 @@ class KontinuumEngine:
 
         return self._snapshot(
             surprise=surprise,
-            anomaly=surprise >= anomaly_threshold,
+            anomaly=anomaly_flag,
             token_id=token_id,
             token=token,
             predictions=predictions,
             extra=self._build_extra(
                 raw_predictions, fired_rule, decision, anomaly_threshold,
-                prev_event_ts,
+                prev_event_ts, stn_brake, stn_hold,
             ),
         )
 
@@ -316,6 +391,11 @@ class KontinuumEngine:
           surprising failure,
         * cerebellum – reflex-rule confidence (recover on success, decay on
           failure) when a rule fired,
+        * serotonin – slow mood baseline (patience) toward success,
+        * lateral habenula – disappointment memory: relieved on success,
+          deepened on rejection (anti-reward suppression),
+        * cortisol – systemic stress bumped on rejection,
+        * bdnf – trophic protection grown for proven actions / reflexes,
         * anterior cingulate – error-rate monitor.
 
         Returns ``True`` when a decision was available to reinforce.
@@ -338,8 +418,27 @@ class KontinuumEngine:
             ctx["state_key"], ctx["action_key"], 1.0 if positive else -1.0
         )
         self.neurorhythms.register_outcome(token_id, positive)
+
+        # Slow mood / anti-reward / stress + neurotrophic protection close here.
+        self.serotonin.reward(positive)
+        if positive:
+            # Relieve any accumulated disappointment for this (state, action)
+            # and grow trophic support for the action that worked.
+            self.habenula.relieve(ctx["state_key"], ctx["action_key"])
+            self.bdnf.reinforce(token_id)
+        else:
+            # Systematic rejection: habenula suppresses it next time, cortisol
+            # rises (the home is pushing back).
+            self.habenula.punish(ctx["state_key"], ctx["action_key"])
+            self.cortisol.stress_event()
+
         if ctx["rule_key"] is not None:
             self.cerebellum.record_outcome(ctx["rule_key"], positive)
+            if positive:
+                rule = self.cerebellum.rules.get(ctx["rule_key"])
+                if rule is not None:
+                    # A proven reflex: protect its target from blanket forgetting.
+                    self.bdnf.reinforce(rule.target)
         self.anterior_cingulate.observe_outcome(positive)
 
         self._last_decision_ctx = None
@@ -358,6 +457,10 @@ class KontinuumEngine:
         * Locus Coeruleus arousal makes the system more reactive when busy.
         * ACC cognitive_control damps confidence by up to 25% when modules
           disagree or outcomes have been going wrong (closed control loop).
+        * Cortisol damps confidence by up to 30% when the home has been under
+          sustained stress (chaotic / unpredictable spells).
+        * Lateral habenula suppresses candidates the user has repeatedly
+          rejected in this context (anti-reward → stop nagging).
         * Entorhinal anticipation pre-activates tokens in the expected room.
         """
         mode = self.insula.current_mode
@@ -370,6 +473,8 @@ class KontinuumEngine:
         arousal_boost = (arousal - 0.3) * 0.15  # -0.045 .. +0.105
         control = max(0.0, min(1.0, getattr(self.anterior_cingulate, "cognitive_control", 0.0)))
         control_damping = 1.0 - 0.25 * control
+        # Cortisol: global conservatism under sustained stress (1.0 at baseline).
+        cortisol_damping = self.cortisol.damping()
         expected_room = self._expected_next_room
 
         ranked = []
@@ -382,9 +487,11 @@ class KontinuumEngine:
             anticipation_boost = (
                 0.05 if (expected_room and action_key.split(".")[0] == expected_room) else 0.0
             )
+            # Lateral habenula: down-weight chronically-rejected (state, action)s.
+            suppression = self.habenula.get_suppression(state_key, action_key)
             bg_conf = (
                 conf + priority * 0.1 + reward_boost + arousal_boost + anticipation_boost
-            ) * control_damping
+            ) * control_damping * cortisol_damping * (1.0 - 0.6 * suppression)
             bg_conf = max(0.05, min(1.0, bg_conf))
             ranked.append((token_id, prob, bg_conf, source, n_obs))
 
@@ -465,6 +572,7 @@ class KontinuumEngine:
             self.sleep_consolidation.consolidate(
                 self.hippocampus, self.cerebellum,
                 self.basal_ganglia, self.neurorhythms,
+                bdnf=self.bdnf,
             )
 
     # ------------------------------------------------------------------
@@ -480,7 +588,8 @@ class KontinuumEngine:
         return "stable"
 
     def _build_extra(self, raw_predictions, fired_rule, decision,
-                     anomaly_threshold, prev_event_ts) -> Dict[str, Any]:
+                     anomaly_threshold, prev_event_ts,
+                     stn_brake: float = 0.0, stn_hold: bool = False) -> Dict[str, Any]:
         """Surface the rich module outputs that used to be discarded."""
         extra: Dict[str, Any] = {
             "anomaly_threshold": round(anomaly_threshold, 3),
@@ -491,6 +600,15 @@ class KontinuumEngine:
             "expected_next_room": self._expected_next_room,
             "raw_prediction_count": len(raw_predictions or []),
             "should_consolidate": self.sleep_consolidation.should_consolidate(prev_event_ts),
+            # Extended neuromodulator / region telemetry (all 0-1 scales):
+            "cortisol": round(self.cortisol.level, 3),
+            "serotonin": round(self.serotonin.level, 3),
+            "acetylcholine": round(self.acetylcholine.mean_expected(), 3),
+            "scn_gain": round(self._last_scn_gain, 3),
+            "stn_brake": round(stn_brake, 3),
+            "stn_hold": bool(stn_hold),
+            "habenula_active": self.habenula.active_count(),
+            "bdnf_protected": self.bdnf.protected_count(),
         }
         if fired_rule is not None:
             extra["reflex"] = {
@@ -549,6 +667,11 @@ class KontinuumEngine:
         "hypothalamus", "spatial_cortex", "prefrontal_cortex",
         "anterior_cingulate", "entorhinal_cortex", "locus_coeruleus",
         "nucleus_accumbens", "reticular", "metaplasticity",
+        # Extended region / neuromodulator set (additive: older brains that
+        # lack these keys simply restore the modules at their init defaults,
+        # so SCHEMA_VERSION stays 1 — the layout grew, it didn't change shape).
+        "habenula", "subthalamic", "suprachiasmatic", "serotonin",
+        "acetylcholine", "cortisol", "bdnf",
     )
 
     def to_dict(self) -> Dict[str, Any]:
