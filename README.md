@@ -30,11 +30,18 @@ print(snap.surprise, snap.anomaly)   # 0..1 surprise, bool anomaly flag
 
 ## What it does
 
-One `observe()` pipeline drives 18 brain-region modules: thalamic tokenization,
+One `observe()` pipeline drives 25 brain-region modules: thalamic tokenization,
 hippocampal n-gram memory, predictive **surprise** with a robust (median + MAD)
 adaptive **anomaly** threshold, cerebellar reflexes, basal-ganglia habits, an
 attention (reticular) **burst filter** for noise, and **sleep consolidation**
 (replay / prune / dream-recombine / synaptic homeostasis during quiet spells).
+
+Since 0.5.0 the set also models the missing slow signals — a **lateral
+habenula** (anti-reward: stop re-proposing rejected actions), a **subthalamic
+nucleus** ("hold your horses" under conflict), a **learned circadian clock**
+(suprachiasmatic), and the **cortisol / acetylcholine / serotonin** modulators
+plus **BDNF** use-dependent protection. All are scalar EMAs or tiny bounded
+maps, start neutral, and add ~0 ms/event.
 
 State is **persistent and bounded**: `engine.to_dict()` / `from_dict()`
 round-trip the full learned brain (with a `schema_version` guard), and the

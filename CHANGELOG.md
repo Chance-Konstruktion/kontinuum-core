@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.5.0 (2026-06-15)
+
+### Extended region & neuromodulator set — seven new modules (all O(1), Pi-friendly)
+
+KONTINUUM Core grows from 18 to 25 neuro-inspired modules. Every addition is a
+scalar EMA or a small bounded map — no ML, no new dependencies, ~0 ms/event —
+and each starts **neutral**, so existing behaviour is unchanged until it has
+learned something. The replay quality-gate actually *improved*: AUC 0.991 →
+**0.995**, anomaly-flag precision 0.96 → **1.00**, recall 0.61 → **0.68**.
+
+**Regions**
+- **Lateral Habenula** (`habenula.py`) — anti-reward. Remembers systematic
+  disappointment per `(context, action)` and suppresses chronically-rejected
+  suggestions during ranking, so the system stops nagging.
+- **Subthalamic Nucleus** (`subthalamic_nucleus.py`) — a "hold your horses"
+  brake. Under high conflict + a thin margin it recommends *waiting* one event
+  instead of acting (serotonin/patience tunes the threshold). Downgrades an
+  actionable decision to OBSERVE — a safety net, never a new action.
+- **Suprachiasmatic Nucleus** (`suprachiasmatic.py`) — a *learned* circadian
+  clock. Entrains to the household's real activity profile and nudges the
+  learning rate ±15 %, so a night-shift home's plasticity peak drifts to when it
+  is actually awake (the fixed cosine was only a population prior).
+
+**Neuromodulators / hormones**
+- **Cortisol** (`cortisol.py`) — slow systemic stress hormone (vs. the fast
+  Locus-Coeruleus arousal). Integrates sustained surprise / anomaly / override
+  into a stress level that makes ranking up to 30 % more conservative during
+  chaotic spells (guests, illness, a move).
+- **Acetylcholine** (`acetylcholine.py`) — *expected* uncertainty (Yu & Dayan,
+  2005). A per-context-bucket estimate of irreducible noise that damps learning
+  where jitter is the norm — the cholinergic complement to the noradrenergic
+  surprise signal.
+- **Serotonin** (`serotonin.py`) — slow mood / patience baseline that tunes the
+  Subthalamic Nucleus and recovers with positive feedback.
+
+**Maintenance ("vitamin" layer)**
+- **BDNF** (`bdnf.py`) — use-dependent structural protection. A proven reflex's
+  target action is shielded from blanket forgetting during sleep consolidation
+  (floored instead of pruned); trophic support fades on disuse.
+
+### Wiring & persistence
+- Wired into `KontinuumEngine.observe()` / `_rank_predictions()` / `feedback()`
+  and surfaced in `EngineSnapshot.extra` (`cortisol`, `serotonin`,
+  `acetylcholine`, `scn_gain`, `stn_brake`, `stn_hold`, `habenula_active`,
+  `bdnf_protected`).
+- Round-tripped by `to_dict()` / `from_dict()`. `SCHEMA_VERSION` stays **1**:
+  the set is purely additive — an older brain that lacks the keys restores those
+  modules at defaults, and an older engine ignores the extra keys.
+- 20 new tests (`tests/test_neuromodulators.py`); full suite **113 → 133** green.
+
 ## 0.4.1 (2026-06-14)
 
 ### Small APIs to support the ha-kontinuum cortex refactor
