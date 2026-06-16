@@ -1,6 +1,6 @@
 """Main public API for KONTINUUM Core.
 
-The KontinuumEngine wires all 25 neuro-inspired modules into a single
+The KontinuumEngine wires all 26 neuro-inspired modules into a single
 pipeline. It is HA-free and can be used standalone or embedded in a
 host integration (ha-kontinuum, ha-kontinuum-lite).
 
@@ -20,6 +20,7 @@ Per-event pipeline (the modules that influence the decision):
     cortisol / serotonin      → slow stress / mood hormones (observe)
     basal_ganglia             → passive Q-observation + Go/NoGo re-ranking
     cerebellum                → reflex rule check + reflex injection
+    interval_timing           → resurface an overdue periodic cadence
     nucleus_accumbens         → habit bias in the ranking
     lateral_habenula          → anti-reward suppression of chronic rejects
     cortisol.damping()        → conservative ranking under sustained stress
@@ -53,6 +54,7 @@ from .habenula import LateralHabenula
 from .hippocampus import Hippocampus
 from .hypothalamus import Hypothalamus
 from .insula import Insula
+from .interval_timing import IntervalTiming
 from .locus_coeruleus import LocusCoeruleus
 from .metaplasticity import Metaplasticity
 from .neurorhythms import Neurorhythms
@@ -136,6 +138,7 @@ class KontinuumEngine:
         self.habenula = LateralHabenula()          # anti-reward (stop nagging)
         self.subthalamic = SubthalamicNucleus()    # "hold your horses" brake
         self.suprachiasmatic = SuprachiasmaticNucleus()  # learned inner clock
+        self.interval_timing = IntervalTiming()    # stopwatch for cadences
         # Slow neuromodulators / hormones:
         self.serotonin = Serotonin()               # mood / patience
         self.acetylcholine = Acetylcholine()       # expected uncertainty
@@ -316,6 +319,16 @@ class KontinuumEngine:
                 fired_rule.successes + 50,  # n_obs bonus for an established reflex
             )
             predictions = [reflex_pred] + (predictions or [])
+        # Interval timing: resurface an overdue, regular cadence (e.g. a task
+        # that recurs every few weeks) that sequence prediction can't see. The
+        # currently-firing token is excluded (it is happening, not "due").
+        # Injected AFTER surprise was computed, so it never skews anomaly.
+        interval_injected = None
+        if ev_now is not None:
+            due = self.interval_timing.due_prediction(ev_now, exclude=token_id)
+            if due is not None and not any(p[0] == due[0] for p in (predictions or [])):
+                predictions = (predictions or []) + [due]
+                interval_injected = due[0]
         if predictions:
             predictions = self._rank_predictions(predictions, bucket, room, timestamp)
 
@@ -356,6 +369,12 @@ class KontinuumEngine:
 
         self._remember_decision(decision, fired_rule_key, bucket, room, timestamp)
 
+        # Record this occurrence's timing so the cadence (and the next "due"
+        # window) is learned. Done last, after due_prediction used the prior
+        # state for THIS event.
+        if ev_now is not None:
+            self.interval_timing.observe(token_id, ev_now)
+
         prev_event_ts = self._last_event_ts
         self._maybe_maintain(timestamp, prev_event_ts)
         self._last_event_ts = time.time()
@@ -368,7 +387,7 @@ class KontinuumEngine:
             predictions=predictions,
             extra=self._build_extra(
                 raw_predictions, fired_rule, decision, anomaly_threshold,
-                prev_event_ts, stn_brake, stn_hold,
+                prev_event_ts, stn_brake, stn_hold, interval_injected,
             ),
         )
 
@@ -589,7 +608,8 @@ class KontinuumEngine:
 
     def _build_extra(self, raw_predictions, fired_rule, decision,
                      anomaly_threshold, prev_event_ts,
-                     stn_brake: float = 0.0, stn_hold: bool = False) -> Dict[str, Any]:
+                     stn_brake: float = 0.0, stn_hold: bool = False,
+                     interval_injected: Optional[int] = None) -> Dict[str, Any]:
         """Surface the rich module outputs that used to be discarded."""
         extra: Dict[str, Any] = {
             "anomaly_threshold": round(anomaly_threshold, 3),
@@ -609,7 +629,10 @@ class KontinuumEngine:
             "stn_hold": bool(stn_hold),
             "habenula_active": self.habenula.active_count(),
             "bdnf_protected": self.bdnf.protected_count(),
+            "interval_tracked": len(self.interval_timing.timers),
         }
+        if interval_injected is not None:
+            extra["interval_due_token"] = self.thalamus.decode_token(interval_injected)
         if fired_rule is not None:
             extra["reflex"] = {
                 "trigger": fired_rule.trigger,
@@ -671,7 +694,7 @@ class KontinuumEngine:
         # lack these keys simply restore the modules at their init defaults,
         # so SCHEMA_VERSION stays 1 — the layout grew, it didn't change shape).
         "habenula", "subthalamic", "suprachiasmatic", "serotonin",
-        "acetylcholine", "cortisol", "bdnf",
+        "acetylcholine", "cortisol", "bdnf", "interval_timing",
     )
 
     def to_dict(self) -> Dict[str, Any]:
