@@ -53,6 +53,13 @@ which the HA integrations surface directly as entities (`sensor.kontinuum_surpri
 `binary_sensor.kontinuum_anomaly`, …). The engine stands on its own; any LLM is
 strictly an optional layer on top.
 
+## Documentation
+
+Full reference in [`docs/`](docs/):
+[**MODULES.md**](docs/MODULES.md) (all 26 brain modules) ·
+[**PIPELINE.md**](docs/PIPELINE.md) (the `observe()` flow, `EngineSnapshot.extra`
+fields, the reward loop, persistence).
+
 ## LLM integration contract (`kontinuum_core.llm`)
 
 The engine is the sub-symbolic brain; an LLM is the optional language / reasoning
