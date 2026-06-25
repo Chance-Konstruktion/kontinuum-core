@@ -71,3 +71,43 @@ def test_engine_triggers_consolidation_after_a_quiet_period():
                "timestamp": datetime(2026, 3, 1, 19, 0, tzinfo=timezone.utc)})
 
     assert e.sleep_consolidation.total_consolidations == before + 1
+
+
+def test_tick_consolidates_during_idle_without_any_event():
+    """The core fix: a quiet spell must consolidate via the host heartbeat,
+    with no further event arriving (the old path could only fire on an event,
+    which by definition meant it was *not* quiet)."""
+    e = _warm(KontinuumEngine())
+    e.sleep_consolidation.last_consolidation_ts = 0.0
+    e.sleep_consolidation.events_since_last = 60
+    e._last_event_ts = time.time() - 3600  # >30 min since last event
+    before = e.sleep_consolidation.total_consolidations
+
+    stats = e.tick()
+
+    assert stats is not None
+    assert e.sleep_consolidation.total_consolidations == before + 1
+
+
+def test_tick_is_a_noop_when_not_quiet():
+    e = _warm(KontinuumEngine())
+    e.sleep_consolidation.events_since_last = 60
+    e._last_event_ts = time.time()  # busy: event just happened
+    before = e.sleep_consolidation.total_consolidations
+
+    assert e.tick() is None
+    assert e.sleep_consolidation.total_consolidations == before
+
+
+def test_force_consolidation_bypasses_all_gates():
+    e = _warm(KontinuumEngine())
+    # No quiet spell, fresh cooldown, but force must still run.
+    e.sleep_consolidation.last_consolidation_ts = time.time()
+    e.sleep_consolidation.events_since_last = 0
+    e._last_event_ts = time.time()
+    before = e.sleep_consolidation.total_consolidations
+
+    stats = e.force_consolidation()
+
+    assert "homeostasis_factor" in stats
+    assert e.sleep_consolidation.total_consolidations == before + 1

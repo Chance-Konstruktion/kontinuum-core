@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Sleep consolidation now actually runs during idle.** Consolidation only
+  became eligible after a ≥30 min quiet spell, but it was only ever *checked*
+  on the event path — the one moment it could never be quiet — so a real idle
+  night consolidated zero times. Added `KontinuumEngine.tick()`, a cheap,
+  self-gating host heartbeat to call on a timer (e.g. every few minutes) so
+  consolidation fires during genuine downtime, plus
+  `KontinuumEngine.force_consolidation()` to run a cycle immediately (tests /
+  manual triggers / host services), bypassing the quiet-spell, cooldown and
+  minimum-event gates.
+
 ## 0.5.0 (2026-06-15)
 
 ### Extended region & neuromodulator set — seven new modules (all O(1), Pi-friendly)

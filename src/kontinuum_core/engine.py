@@ -395,6 +395,45 @@ class KontinuumEngine:
         return self.observe(context or {})
 
     # ------------------------------------------------------------------
+    # Idle heartbeat (host-driven, event-independent maintenance)
+    # ------------------------------------------------------------------
+    def tick(self) -> Optional[Dict[str, Any]]:
+        """Host-called heartbeat for maintenance that must run when *no*
+        events arrive.
+
+        Sleep consolidation only ever became eligible during a quiet spell
+        (≥30 min since the last event), but it was only ever *checked* on the
+        event path — i.e. at the one moment it could never be quiet. A real
+        idle night therefore consolidated zero times. Call this on a timer
+        (e.g. every few minutes) so consolidation can fire during genuine
+        downtime. Cheap and self-gating: it does nothing unless
+        ``should_consolidate`` is satisfied.
+
+        Returns the consolidation stats dict if a cycle ran, else ``None``.
+        """
+        if self.sleep_consolidation.should_consolidate(self._last_event_ts):
+            return self.sleep_consolidation.consolidate(
+                self.hippocampus, self.cerebellum,
+                self.basal_ganglia, self.neurorhythms,
+                bdnf=self.bdnf,
+            )
+        return None
+
+    def force_consolidation(self) -> Dict[str, Any]:
+        """Run a consolidation cycle immediately, bypassing the quiet-spell,
+        cooldown and minimum-event gates.
+
+        Intended for tests, manual triggers and host services
+        (e.g. a ``force_consolidation`` action) — useful to verify the replay
+        / dream / homeostasis pipeline without waiting for a real idle period.
+        """
+        return self.sleep_consolidation.consolidate(
+            self.hippocampus, self.cerebellum,
+            self.basal_ganglia, self.neurorhythms,
+            bdnf=self.bdnf,
+        )
+
+    # ------------------------------------------------------------------
     # Outcome learning (host-driven reward loop)
     # ------------------------------------------------------------------
     def feedback(self, positive: bool) -> bool:
