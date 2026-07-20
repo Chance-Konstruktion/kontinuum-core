@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Added
+
+- **Ingestion diagnostics: `KontinuumEngine.get_diagnostics()`.** Registration
+  and observation filter silently (`register_entity()` drops entities without a
+  resolvable room; `observe()` drops events from unregistered entities), which
+  made a stalled `hippo_events` counter indistinguishable from an idle home.
+  The dead `track_unassigned_event()` / `get_unassigned_report()` machinery is
+  now wired up: `process()` counts dropped events under
+  `events_dropped_unregistered` / `events_dropped_no_room` and records the
+  offending entities, and `get_diagnostics()` surfaces those counters plus a
+  `top_unassigned` triage list (with room suggestions). Documented the
+  per-room token granularity (`raum.semantik.zustand`) in `docs/PIPELINE.md`:
+  two same-semantic entities in one room share a token and need separate rooms
+  to be learned apart.
+
 ### Fixed
 
 - **Sleep consolidation now actually runs during idle.** Consolidation only
