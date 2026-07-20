@@ -36,6 +36,44 @@ def test_unregistered_entity_returns_none():
     assert t.process("sensor.unknown_entity", "1", None) is None
 
 
+def test_unregistered_event_is_counted_not_silent():
+    """Dropping an unregistered entity's event bumps a diagnostic counter,
+    so a stalled ingest pipeline is observable rather than silent."""
+    t = Thalamus()
+    assert t.process("sensor.unknown_entity", "1", None) is None
+    diag = t.get_diagnostics()
+    assert diag["events_dropped_unregistered"] == 1
+    assert diag["events_processed"] == 0
+
+
+def test_room_less_entity_event_is_tracked_and_reported():
+    """A switch with no area/name hints resolves to room "unknown", so it is
+    kept in the unassigned set instead of being learned. Its events are then
+    counted and surfaced in the unassigned report for triage rather than
+    vanishing silently."""
+    t = Thalamus()
+    t.register_entity("switch.mystery_plug", domain="switch")
+    result = t.process("switch.mystery_plug", "on", "off")
+    assert result is None
+    diag = t.get_diagnostics()
+    assert diag["events_dropped_unregistered"] >= 1
+    assert diag["unassigned_entities"] >= 1
+    reported = {row[0] for row in diag["top_unassigned"]}
+    assert "switch.mystery_plug" in reported
+
+
+def test_get_diagnostics_has_expected_shape():
+    t = Thalamus()
+    _register(t, "binary_sensor.bedroom_motion")
+    t.process("binary_sensor.bedroom_motion", "on", "off")
+    diag = t.get_diagnostics()
+    for key in ("entities_registered", "events_processed",
+                "events_dropped_unregistered", "events_dropped_no_room",
+                "unassigned_entities", "top_unassigned"):
+        assert key in diag, f"missing diagnostics key: {key}"
+    assert diag["events_processed"] == 1
+
+
 def test_registered_entity_emits_token_dict():
     """A registered entity with a real state change yields a token dict."""
     t = Thalamus()

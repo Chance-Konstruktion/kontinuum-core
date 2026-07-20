@@ -32,6 +32,12 @@ engine.from_dict(blob)        # wiederherstellen
 
 1. **Thalamus** filtert + tokenisiert → `token_id`, `room`, `semantic`, `state`.
    Gefilterte/leere Events → früher `EngineSnapshot` mit `extra["skipped"]`.
+   > **Token-Granularität:** Der Token ist `raum.semantik.zustand`, **nicht**
+   > pro Entity. Zwei Entities gleicher Semantik im selben Raum (z. B. zwei
+   > `switch` im Wohnzimmer) erzeugen dasselbe Token und sind für die Engine
+   > ununterscheidbar. Sollen ihre Verläufe getrennt gelernt werden, müssen
+   > sie in **getrennten Räumen** liegen (oder über eine
+   > `custom_semantic_rule` unterschiedliche Semantiken erhalten).
 2. **Formatio Reticularis** Burst-Gate (sonst `skipped="burst_filtered"`).
 3. **Locus Coeruleus** + **Sleep**-Zähler beobachten das Event.
 4. **Hypothalamus** absorbiert Energie/Klima; **Spatial/Entorhinal** aktualisieren
@@ -103,6 +109,31 @@ Lernschleifen: Basalganglien (TD-Q-Update), Nucleus Accumbens, Neurorhythms
 Ablehnung), **BDNF** (Schutz bewährter Aktionen) und ACC (Fehlerrate).
 Gibt `True` zurück, wenn eine Entscheidung zum Verstärken vorlag (eine pro
 Entscheidung).
+
+## `get_diagnostics()` — warum lernt nichts?
+
+Registrierung und Ingestion filtern an mehreren Stellen **still** (`return None`):
+
+- `register_entity()` verwirft Entities ohne auflösbaren Raum (landen in der
+  Unassigned-Liste statt gelernt zu werden).
+- `observe()` verwirft Events **nicht angemeldeter** Entities kommentarlos.
+
+Damit ein stehengebliebener `hippo_events`-Zähler nicht wie ein leeres Haus
+aussieht, macht `engine.get_diagnostics()` diese Drops sichtbar:
+
+| Feld | Bedeutung |
+|---|---|
+| `entities_registered` | erfolgreich mit Raum + Semantik angemeldet |
+| `entities_filtered` | bei Registrierung wegen fehlendem Raum verworfen |
+| `events_processed` | Events, die zu einem Token wurden |
+| `events_dropped_unregistered` | Events unangemeldeter Entities (still verworfen) |
+| `events_dropped_no_room` | Events angemeldeter, aber raumloser Entities |
+| `unassigned_entities` | Anzahl raumloser Entities, die Events senden |
+| `top_unassigned` | `(entity_id, count, semantic, name, raum_vorschlag)` zur Triage |
+
+`entities_registered == 0` bei hohem `events_dropped_unregistered` heißt: es
+wurde nie `register_entity()` mit auflösbarem Raum aufgerufen — der häufigste
+Stolperstein beim ersten Anlauf.
 
 ## Persistenz
 

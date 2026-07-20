@@ -195,6 +195,12 @@ class Thalamus:
             "rooms_discovered": 0,
             "tokens_filtered": 0,
             "events_processed": 0,
+            # Diagnostic drop counters. These make the otherwise-silent
+            # filtering in process() observable: an engine whose hippocampus
+            # never learns (hippo_events stuck at 0) can be told apart from an
+            # idle home by inspecting *why* events were dropped.
+            "events_dropped_unregistered": 0,
+            "events_dropped_no_room": 0,
         }
         self._known_rooms = set()
         self.custom_semantic_rules = []
@@ -451,11 +457,19 @@ class Thalamus:
         if entity_id in self._ignored_entities:
             return None
         if entity_id not in self.entity_semantic:
+            # Unregistered entity (never registered, or registered but dropped
+            # for lack of a room/semantic). Instead of dropping it in silence,
+            # count it and — if we saw it during registration — tally the event
+            # so get_unassigned_report() can surface it with a room suggestion.
+            self.stats["events_dropped_unregistered"] += 1
+            self.track_unassigned_event(entity_id)
             return None
         semantic = self.entity_semantic[entity_id]
         room = self.entity_room.get(entity_id, "unknown")
         if room == "unknown":
             self.stats["tokens_filtered"] += 1
+            self.stats["events_dropped_no_room"] += 1
+            self.track_unassigned_event(entity_id)
             return None
         state = self._normalize_state(semantic, new_state)
         if not state:
@@ -753,6 +767,30 @@ class Thalamus:
             ))
         entries.sort(key=lambda x: -x[1])
         return entries[:top_n]
+
+    def get_diagnostics(self) -> dict:
+        """Snapshot of registration/filtering health.
+
+        Surfaces the counters that explain a "nothing is learning" symptom:
+        how many entities registered, how many events were processed vs.
+        dropped (and why), plus the top unassigned entities that are emitting
+        events but lack a room. A room is only distinguishable per-room, so an
+        entity stuck at ``unknown`` never contributes a token.
+        """
+        return {
+            "entities_registered": self.stats.get("entities_registered", 0),
+            "entities_filtered": self.stats.get("entities_filtered", 0),
+            "entities_ignored": self.stats.get("entities_ignored", 0),
+            "rooms_discovered": self.stats.get("rooms_discovered", 0),
+            "events_processed": self.stats.get("events_processed", 0),
+            "tokens_filtered": self.stats.get("tokens_filtered", 0),
+            "events_dropped_unregistered": self.stats.get(
+                "events_dropped_unregistered", 0),
+            "events_dropped_no_room": self.stats.get(
+                "events_dropped_no_room", 0),
+            "unassigned_entities": len(self._unassigned_entities),
+            "top_unassigned": self.get_unassigned_report(top_n=10),
+        }
 
     def to_dict(self) -> dict:
         return {

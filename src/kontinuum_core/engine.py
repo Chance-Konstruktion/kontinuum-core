@@ -177,6 +177,19 @@ class KontinuumEngine:
     def register_entity(self, entity_id: str, **kwargs) -> None:
         self.thalamus.register_entity(entity_id, **kwargs)
 
+    def get_diagnostics(self) -> Dict[str, Any]:
+        """Registration/ingestion health for debugging a quiet engine.
+
+        Entities without a resolvable room are dropped at registration, and
+        events from unregistered entities are dropped during ``observe``. Both
+        are counted here so a stalled ``hippo_events`` can be traced to its
+        cause (nothing registered, everything room-less, all events filtered)
+        rather than looking like an idle home.
+        """
+        diag = self.thalamus.get_diagnostics()
+        diag["ticks_observed"] = self.tick_count
+        return diag
+
     # ------------------------------------------------------------------
     # Main observation pipeline
     # ------------------------------------------------------------------
