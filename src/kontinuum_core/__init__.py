@@ -14,7 +14,19 @@ from .priors import (
     seed_engine_from_prior,
 )
 
-__version__ = "0.6.0"
+try:
+    # Written at build time by setuptools-scm from the Git tag.
+    from ._version import version as __version__
+except Exception:  # pragma: no cover - source tree without a built _version.py
+    try:
+        from importlib.metadata import PackageNotFoundError, version as _pkg_version
+
+        try:
+            __version__ = _pkg_version("kontinuum-core")
+        except PackageNotFoundError:
+            __version__ = "0.0.0"
+    except Exception:
+        __version__ = "0.0.0"
 __all__ = [
     "KontinuumEngine",
     "Scheduler",
