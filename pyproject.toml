@@ -1,10 +1,14 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=61.0", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "kontinuum-core"
-version = "0.6.0"
+# Version is derived from the Git tag by setuptools-scm (see [tool.setuptools_scm]
+# below). Tagging `v0.6.1` and pushing it is now the single source of truth for
+# the release version — no more manually bumping a hardcoded string, which is
+# what silently left PyPI on 0.6.0 while the tag said 0.6.1.
+dynamic = ["version"]
 authors = [{name = "Chance-Konstruktion", email = "introareback@gmail.com"}]
 description = "Neuro-inspired learning engine for anomaly detection"
 readme = "README.md"
@@ -28,6 +32,14 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools_scm]
+# Write the resolved version to an importable file so runtime __version__ and
+# the built package metadata always agree. The file is generated (git-ignored).
+version_file = "src/kontinuum_core/_version.py"
+# When built outside a Git checkout with no tags/metadata (rare — e.g. a bare
+# source snapshot), fall back rather than hard-failing the build.
+fallback_version = "0.0.0"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

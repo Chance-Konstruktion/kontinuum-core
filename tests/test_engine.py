@@ -10,6 +10,8 @@ they only assert on structure, wiring, and the documented invariants.
 """
 from __future__ import annotations
 
+import re
+
 from kontinuum_core import (
     KontinuumEngine,
     MemoryState,
@@ -53,7 +55,11 @@ def test_public_exports():
         "parse_home_prior",
         "seed_engine_from_prior",
     }
-    assert kontinuum_core.__version__ == "0.6.0"
+    # Version is derived from the Git tag by setuptools-scm, so assert it is a
+    # sane, non-empty version string rather than pinning an exact value that a
+    # release would have to keep chasing.
+    assert isinstance(kontinuum_core.__version__, str)
+    assert re.match(r"^\d+\.\d+", kontinuum_core.__version__)
 
 
 def test_data_types_default_construct():
