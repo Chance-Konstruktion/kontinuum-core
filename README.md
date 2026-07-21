@@ -5,10 +5,11 @@ Pure-Python, neuro-inspired learning engine extracted from
 Assistant dependency — usable from any Python project. **Zero runtime
 dependencies** (standard library only), Python 3.9+.
 
-> **Part of the 3-repo family:**
+> **Part of the KONTINUUM family:**
 > **kontinuum-core** (this repo, HA-free Python package on PyPI) ·
 > [`ha-kontinuum`](https://github.com/Chance-Konstruktion/ha-kontinuum) (full HA Pro integration with UI) ·
-> [`ha-kontinuum-lite`](https://github.com/Chance-Konstruktion/ha-kontinuum-lite) (slim HA integration, no UI)
+> [`ha-kontinuum-lite`](https://github.com/Chance-Konstruktion/ha-kontinuum-lite) (slim HA integration, no UI) ·
+> [`kontinuum-AI-anomaly`](https://github.com/Chance-Konstruktion/kontinuum-AI-anomaly) (anomaly / novelty monitor for **agent action streams**, built on this engine)
 
 ## Installation
 
@@ -78,6 +79,22 @@ layer on top.
 `parse_home_prior(llm_reply)` + `seed_engine_from_prior(engine, prior)` let an
 LLM describe the home at setup, so the engine starts already expecting the
 household routine instead of from a blank slate.
+
+## Built on top of core
+
+The engine is designed for smart-home event streams, but it is a general
+sequence-learner. [**`kontinuum-AI-anomaly`**](https://github.com/Chance-Konstruktion/kontinuum-AI-anomaly)
+(PyPI: `ai-kontinuum-monitor`) points it at an **AI agent's action log** instead
+and adds the monitor layer core deliberately leaves out — robust scoring,
+anomaly history, alerting (escalation / snooze), a dashboard, multi-agent
+cross-stream correlation, strategy presets and an LLM-feedback loop. Core stays
+**untouched** there; it is a thin, additive layer, which is what keeps this
+engine equally usable from the Home Assistant integrations and from an
+agent-monitoring context.
+
+```bash
+pip install ai-kontinuum-monitor   # pulls in kontinuum-core
+```
 
 ## Benchmark
 
