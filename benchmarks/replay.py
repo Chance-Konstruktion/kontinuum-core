@@ -19,6 +19,7 @@ smoke gate. The reusable pieces are imported by ``tests/test_benchmark.py``.
 from __future__ import annotations
 
 import os
+import random
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -81,6 +82,11 @@ def _sensor(room: str) -> str:
 
 def _build_engine() -> KontinuumEngine:
     e = KontinuumEngine()
+    # Sleep consolidation now fires during the (event-time) replay and its
+    # dream-replay phase samples at random. Give it a seeded RNG so this
+    # quality-gate replay stays deterministic instead of depending on the
+    # global ``random`` state.
+    e.sleep_consolidation._rng = random.Random(0)
     for room in ROOMS:
         e.register_entity(_sensor(room), ha_area=room, domain="binary_sensor")
     return e

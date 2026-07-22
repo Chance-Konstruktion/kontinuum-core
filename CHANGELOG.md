@@ -38,7 +38,12 @@
   cooldown is still respected and the quiet path stays the normal case — the
   fallback is the upper bound, so it never aggressively fights live use.
   Persistence stays backward compatible (`to_dict`/`from_dict` unchanged field
-  names, `.get()` defaults); old states load without error.
+  names, `.get()` defaults); old states load without error. Because
+  consolidation now actually fires during the (event-time) replay benchmark, its
+  dream-replay phase — which samples context pairs at random — is given an
+  injectable RNG (`SleepConsolidation(rng=...)`, default = global `random`) and
+  the benchmark seeds it, so the quality-gate replay stays deterministic instead
+  of depending on global RNG state.
 
 ### Documentation
 

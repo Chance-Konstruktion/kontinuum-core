@@ -51,7 +51,13 @@ DREAM_CROSS_CONTEXT_PAIRS = 10  # Anzahl der Cross-Context-Paare pro Dream Repla
 class SleepConsolidation:
     """Konsolidiert Muster in ruhigen Phasen."""
 
-    def __init__(self):
+    def __init__(self, rng=None):
+        # Dream replay (Phase 4) samples context pairs at random. Use an
+        # injectable RNG so consolidation is deterministic when needed
+        # (replay/backtest quality gates) and never perturbs — or depends on —
+        # the caller's global ``random`` stream. Defaults to the global module
+        # for normal runtime use.
+        self._rng = rng if rng is not None else random
         self.last_consolidation_ts = 0.0
         self.events_since_last = 0
         self.total_consolidations = 0
@@ -235,7 +241,7 @@ class SleepConsolidation:
                 if len(buckets) >= 2:
                     pairs_tried = 0
                     for _ in range(DREAM_CROSS_CONTEXT_PAIRS):
-                        b1, b2 = random.sample(buckets, 2)
+                        b1, b2 = self._rng.sample(buckets, 2)
                         ngrams_1 = hippocampus.transitions.get(b1, {})
                         ngrams_2 = hippocampus.transitions.get(b2, {})
                         if not ngrams_1 or not ngrams_2:
