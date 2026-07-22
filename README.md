@@ -1,5 +1,10 @@
 # KONTINUUM Core
 
+[![Tests](https://github.com/Chance-Konstruktion/kontinuum-core/actions/workflows/tests.yaml/badge.svg?branch=main)](https://github.com/Chance-Konstruktion/kontinuum-core/actions/workflows/tests.yaml)
+[![PyPI version](https://img.shields.io/pypi/v/kontinuum-core.svg)](https://pypi.org/project/kontinuum-core/)
+[![Python versions](https://img.shields.io/pypi/pyversions/kontinuum-core.svg)](https://pypi.org/project/kontinuum-core/)
+[![License: AGPL-3.0](https://img.shields.io/pypi/l/kontinuum-core.svg)](https://github.com/Chance-Konstruktion/kontinuum-core/blob/main/LICENSE)
+
 Pure-Python, neuro-inspired learning engine extracted from
 [KONTINUUM](https://github.com/Chance-Konstruktion/ha-kontinuum). No Home
 Assistant dependency — usable from any Python project. **Zero runtime
