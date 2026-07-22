@@ -13,6 +13,14 @@ Neu in v0.20.0:
 
 Läuft in ruhigen Phasen (wenige Events) oder nachts automatisch.
 Extrem ressourcenschonend: max 1x pro Stunde, nur wenn nötig.
+
+Zeit-Basis: alle Gates rechnen in **Event-Zeit** (die aktuelle Event-Zeit wird
+an ``should_consolidate``/``consolidate`` übergeben), nicht in Wall-Clock.
+Dadurch verhält sich Consolidation in Echtzeit UND im Replay/Backtest identisch
+und ist testbar. Zusätzlich zum Quiet-Pfad gibt es einen Fallback-Trigger
+(``MAX_EVENTS_BEFORE_FORCED`` / ``MAX_INTERVAL_SECONDS``) als Obergrenze, damit
+auch ein belebter Haushalt ohne echtes Ruhefenster irgendwann konsolidiert —
+ohne den Normalfall (Quiet) aggressiv zu verdrängen.
 """
 
 import logging
@@ -29,6 +37,12 @@ _LOGGER = logging.getLogger(__name__)
 QUIET_THRESHOLD = 1800       # 30 Min ohne Events = "ruhig"
 MIN_EVENTS_FOR_CONSOLIDATION = 50
 COOLDOWN_SECONDS = 3600      # Max 1x pro Stunde
+# Fallback-Trigger ("Notausgang"): auch ohne perfektes Ruhefenster konsolidieren,
+# wenn seit der letzten Konsolidierung zu viele Events ODER zu viel Event-Zeit
+# vergangen ist. Obergrenze, nicht Normalfall — der Quiet-Pfad bleibt bevorzugt,
+# damit nie mitten in einer belebten Phase aggressiv konsolidiert wird.
+MAX_EVENTS_BEFORE_FORCED = 500      # so viele Events erzwingen Konsolidierung
+MAX_INTERVAL_SECONDS = 86400        # 24 h Event-Zeit erzwingen Konsolidierung
 DECAY_BOOST_FACTOR = 1.5     # Schwache Muster stärker vergessen
 REINFORCE_FACTOR = 1.08      # Starke Muster leicht verstärken
 DREAM_CROSS_CONTEXT_PAIRS = 10  # Anzahl der Cross-Context-Paare pro Dream Replay
@@ -52,26 +66,48 @@ class SleepConsolidation:
         """Zählt Events seit letzter Konsolidierung."""
         self.events_since_last += 1
 
-    def should_consolidate(self, last_event_ts: float) -> bool:
-        """Prüft ob konsolidiert werden soll."""
-        now = time.time()
+    def should_consolidate(self, now_ts: float, last_event_ts: float) -> bool:
+        """Prüft ob konsolidiert werden soll.
 
-        # Cooldown einhalten
-        if now - self.last_consolidation_ts < COOLDOWN_SECONDS:
+        Rechnet vollständig in **Event-Zeit** (``now_ts`` = aktuelle Event-Zeit,
+        ``last_event_ts`` = Event-Zeit des vorigen Events, beide als Epoch-Float).
+        Dadurch verhält sich das Gate in Echtzeit und im Replay/Backtest
+        identisch — in realer HA sind Event-Timestamps ohnehin ~Wall-Clock.
+
+        Gates:
+        * Cooldown: höchstens 1×/``COOLDOWN_SECONDS``.
+        * Min-Events: mindestens ``MIN_EVENTS_FOR_CONSOLIDATION`` seit dem letzten Lauf.
+        * Quiet: bevorzugter Normalfall — ≥``QUIET_THRESHOLD`` ohne Events.
+        * Fallback ("Notausgang"): erzwingt einen Lauf auch ohne Ruhefenster,
+          sobald ``MAX_EVENTS_BEFORE_FORCED`` Events ODER ``MAX_INTERVAL_SECONDS``
+          Event-Zeit seit der letzten Konsolidierung überschritten sind.
+        """
+        # Cooldown einhalten (gilt auch für den Fallback)
+        if now_ts - self.last_consolidation_ts < COOLDOWN_SECONDS:
             return False
 
         # Genug Events gesammelt?
         if self.events_since_last < MIN_EVENTS_FOR_CONSOLIDATION:
             return False
 
-        # Ruhige Phase? (lang genug keine Events)
-        if last_event_ts > 0 and (now - last_event_ts) < QUIET_THRESHOLD:
+        # Fallback-Trigger: zu viele Events oder zu viel Event-Zeit seit dem
+        # letzten Lauf → konsolidieren, auch ohne perfektes Ruhefenster. Das
+        # Interval-Limit gilt erst nach der ersten Konsolidierung, damit ein
+        # frischer Zustand (last_consolidation_ts == 0) nicht sofort forciert.
+        if self.events_since_last >= MAX_EVENTS_BEFORE_FORCED:
+            return True
+        if (self.last_consolidation_ts > 0
+                and (now_ts - self.last_consolidation_ts) >= MAX_INTERVAL_SECONDS):
+            return True
+
+        # Ruhige Phase? (lang genug keine Events) — bevorzugter Normalfall
+        if last_event_ts > 0 and (now_ts - last_event_ts) < QUIET_THRESHOLD:
             return False
 
         return True
 
     def consolidate(self, hippocampus, cerebellum, basal_ganglia=None,
-                    neurorhythms=None, bdnf=None):
+                    neurorhythms=None, bdnf=None, now_ts=None):
         """
         Führt die Konsolidierung durch:
         1. Hippocampus: Schwache Muster stärker vergessen, starke verstärken
@@ -83,9 +119,14 @@ class SleepConsolidation:
         5. Synaptic Homeostasis: Alle Gewichte proportional herunterskalieren
 
         Returns dict mit Statistiken.
+
+        ``now_ts`` ist die aktuelle **Event-Zeit** (Epoch-Float); fehlt sie,
+        wird auf die Wall-Clock zurückgefallen (ein Ort, konsistent). Cooldown-
+        und Fallback-Gates in ``should_consolidate`` rechnen gegen diesen Wert.
         """
-        now = time.time()
-        self.last_consolidation_ts = now
+        if now_ts is None:
+            now_ts = time.time()
+        self.last_consolidation_ts = now_ts
         events_processed = self.events_since_last
         self.events_since_last = 0
         self.total_consolidations += 1

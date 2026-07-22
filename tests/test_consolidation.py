@@ -62,13 +62,16 @@ def test_consolidate_does_not_break_prediction():
 def test_engine_triggers_consolidation_after_a_quiet_period():
     e = _warm(KontinuumEngine())
     # Force the "quiet spell" preconditions, then one more event must run it.
+    # The quiet gate now runs in EVENT time, so the previous event time must be
+    # ≥30 min before the incoming event's timestamp (not wall-clock).
+    event_ts = datetime(2026, 3, 1, 19, 0, tzinfo=timezone.utc)
     e.sleep_consolidation.last_consolidation_ts = 0.0
     e.sleep_consolidation.events_since_last = 60
-    e._last_event_ts = time.time() - 3600  # >30 min since last event
+    e._last_event_ts = (event_ts - timedelta(minutes=60)).timestamp()
     before = e.sleep_consolidation.total_consolidations
 
     e.observe({"entity_id": "switch.k", "new_state": "on",
-               "timestamp": datetime(2026, 3, 1, 19, 0, tzinfo=timezone.utc)})
+               "timestamp": event_ts})
 
     assert e.sleep_consolidation.total_consolidations == before + 1
 

@@ -388,9 +388,14 @@ class KontinuumEngine:
         if ev_now is not None:
             self.interval_timing.observe(token_id, ev_now)
 
+        # Maintenance rechnet in EVENT-Zeit (nicht Wall-Clock), damit Sleep-
+        # Consolidation & Co. in Echtzeit UND im Replay/Backtest identisch und
+        # testbar sind. Fällt ein Event ohne Timestamp rein, einmalig konsistent
+        # auf die Wall-Clock zurückfallen.
         prev_event_ts = self._last_event_ts
-        self._maybe_maintain(timestamp, prev_event_ts)
-        self._last_event_ts = time.time()
+        now_ts = ev_now if ev_now is not None else datetime.now(timezone.utc).timestamp()
+        self._maybe_maintain(timestamp, prev_event_ts, now_ts)
+        self._last_event_ts = now_ts
 
         return self._snapshot(
             surprise=surprise,
@@ -400,7 +405,7 @@ class KontinuumEngine:
             predictions=predictions,
             extra=self._build_extra(
                 raw_predictions, fired_rule, decision, anomaly_threshold,
-                prev_event_ts, stn_brake, stn_hold, interval_injected,
+                prev_event_ts, stn_brake, stn_hold, interval_injected, now_ts,
             ),
         )
 
@@ -424,11 +429,12 @@ class KontinuumEngine:
 
         Returns the consolidation stats dict if a cycle ran, else ``None``.
         """
-        if self.sleep_consolidation.should_consolidate(self._last_event_ts):
+        now_ts = datetime.now(timezone.utc).timestamp()
+        if self.sleep_consolidation.should_consolidate(now_ts, self._last_event_ts):
             return self.sleep_consolidation.consolidate(
                 self.hippocampus, self.cerebellum,
                 self.basal_ganglia, self.neurorhythms,
-                bdnf=self.bdnf,
+                bdnf=self.bdnf, now_ts=now_ts,
             )
         return None
 
@@ -628,22 +634,32 @@ class KontinuumEngine:
             "rule_key": fired_rule_key,
         }
 
-    def _maybe_maintain(self, timestamp, prev_event_ts: float = 0.0) -> None:
-        """Coarse-cadence background maintenance run inline on the event path."""
+    def _maybe_maintain(self, timestamp, prev_event_ts: float = 0.0,
+                        now_ts: Optional[float] = None) -> None:
+        """Coarse-cadence background maintenance run inline on the event path.
+
+        ``now_ts`` is the current **event time** (epoch float); it falls back to
+        the wall clock once, consistently, when no event timestamp is available.
+        """
+        if now_ts is None:
+            now_ts = datetime.now(timezone.utc).timestamp()
         if self.tick_count % COMPILE_EVERY == 0:
             self.cerebellum.compile_rules(self.hippocampus)
         now = time.time()
         if now - self.entorhinal_cortex.last_prune_ts > ENTORHINAL_PRUNE_SECONDS:
             self.entorhinal_cortex.prune_old_transitions()
-        # Sleep consolidation: during a quiet spell (≥30 min no events, ≥50
-        # events since last, ≤1×/h) replay/prune memory, dream-recombine,
-        # smooth Q-values and run synaptic homeostasis. Off in busy periods and
-        # in tight replays (wall-clock quiet check), so it never fights live use.
-        if self.sleep_consolidation.should_consolidate(prev_event_ts):
+        # Sleep consolidation runs in EVENT time (not wall-clock), so it behaves
+        # identically live and in replay/backtest. Normal path: a quiet spell
+        # (≥30 min no events, ≥50 events since last, ≤1×/h) replays/prunes memory,
+        # dream-recombines, smooths Q-values and runs synaptic homeostasis. A
+        # fallback trigger (too many events / too much event-time) is the upper
+        # bound so a busy home without a real quiet window still consolidates —
+        # it never fights live use as the normal case.
+        if self.sleep_consolidation.should_consolidate(now_ts, prev_event_ts):
             self.sleep_consolidation.consolidate(
                 self.hippocampus, self.cerebellum,
                 self.basal_ganglia, self.neurorhythms,
-                bdnf=self.bdnf,
+                bdnf=self.bdnf, now_ts=now_ts,
             )
 
     # ------------------------------------------------------------------
@@ -661,7 +677,8 @@ class KontinuumEngine:
     def _build_extra(self, raw_predictions, fired_rule, decision,
                      anomaly_threshold, prev_event_ts,
                      stn_brake: float = 0.0, stn_hold: bool = False,
-                     interval_injected: Optional[int] = None) -> Dict[str, Any]:
+                     interval_injected: Optional[int] = None,
+                     now_ts: Optional[float] = None) -> Dict[str, Any]:
         """Surface the rich module outputs that used to be discarded."""
         extra: Dict[str, Any] = {
             "anomaly_threshold": round(anomaly_threshold, 3),
@@ -671,7 +688,10 @@ class KontinuumEngine:
             "dopamine": round(self.basal_ganglia.dopamine_signal, 3),
             "expected_next_room": self._expected_next_room,
             "raw_prediction_count": len(raw_predictions or []),
-            "should_consolidate": self.sleep_consolidation.should_consolidate(prev_event_ts),
+            "should_consolidate": self.sleep_consolidation.should_consolidate(
+                now_ts if now_ts is not None else datetime.now(timezone.utc).timestamp(),
+                prev_event_ts,
+            ),
             # Extended neuromodulator / region telemetry (all 0-1 scales):
             "cortisol": round(self.cortisol.level, 3),
             "serotonin": round(self.serotonin.level, 3),
