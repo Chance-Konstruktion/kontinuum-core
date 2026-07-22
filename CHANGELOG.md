@@ -17,6 +17,47 @@
   two same-semantic entities in one room share a token and need separate rooms
   to be learned apart.
 
+### Changed
+
+- **Sleep consolidation now computes in event time, not wall-clock.**
+  `should_consolidate()` took its clock from `time.time()` internally, so all
+  three gates (cooldown, min-events, quiet) were wall-clock based. In a burst
+  replay/backtest — thousands of events processed within milliseconds of
+  wall-clock — the quiet gate `now - last_event_ts ≈ 0 < QUIET_THRESHOLD` was
+  never satisfied, so consolidation fired **zero** times and was invisible and
+  untestable. `should_consolidate(now_ts, last_event_ts)` and `consolidate(...,
+  now_ts=...)` now take the current **event time** (epoch float); the engine
+  stores `_last_event_ts` as the event `timestamp` and falls back to
+  `datetime.now(timezone.utc)` once, consistently, when an event has no
+  timestamp. Behaviour is now identical live and in replay — in real HA event
+  timestamps are ~wall-clock anyway, so no behaviour change for live users.
+- **Consolidation fallback trigger ("Notausgang").** In addition to the quiet
+  path, consolidation is now forced once `MAX_EVENTS_BEFORE_FORCED` (500) events
+  or `MAX_INTERVAL_SECONDS` (24 h event time) have passed since the last cycle,
+  so a busy home without a real ≥30 min quiet window still consolidates. The
+  cooldown is still respected and the quiet path stays the normal case — the
+  fallback is the upper bound, so it never aggressively fights live use.
+  Persistence stays backward compatible (`to_dict`/`from_dict` unchanged field
+  names, `.get()` defaults); old states load without error. Because
+  consolidation now actually fires during the (event-time) replay benchmark, its
+  dream-replay phase — which samples context pairs at random — is given an
+  injectable RNG (`SleepConsolidation(rng=...)`, default = global `random`) and
+  the benchmark seeds it, so the quality-gate replay stays deterministic instead
+  of depending on global RNG state.
+
+### Documentation
+
+- **Reward loop is explicit-feedback only (documented).** Nucleus-accumbens
+  `reinforce()` and the neurorhythms dopamine outcome fire *only* from the
+  host-facing `engine.feedback()` — so "0 dopamine bursts in shadow/observer
+  mode" is expected, not a defect. `prefrontal_cortex.check_implicit_positives()`
+  is now clearly marked as experimental / not wired (no call site in core, not
+  connected to accumbens or dopamine, still wall-clock based); wiring autonomous
+  implicit learning would be a deliberate product decision with its own
+  guardrails. Added `tests/test_reward_loop.py` locking in the explicit-feedback
+  contract (positive reinforces, negative penalises, observation alone fires no
+  bursts).
+
 ### Fixed
 
 - **Sleep consolidation now actually runs during idle.** Consolidation only

@@ -244,6 +244,21 @@ class PrefrontalCortex:
         return True
 
     def check_implicit_positives(self, amygdala):
+        """EXPERIMENTELL / NICHT VERDRAHTET — im Core aktuell nirgends aufgerufen.
+
+        Impliziter Lernpfad: eine eigene Aktion, die nach ``IMPLICIT_POSITIVE_DELAY``
+        nicht überschrieben wurde, gilt als schwach positiv. Bewusst **nicht** an
+        den Reward-Loop (Nucleus Accumbens / Neurorhythms-Dopamin) angebunden — der
+        Reward-Loop läuft ausschließlich über das explizite ``engine.feedback()``
+        (siehe dessen Docstring) und gehört an die Host-/HA-Integration, nicht ins
+        autonome Core-Verhalten. Autonomes implizites Lernen wäre eine bewusste
+        Produktentscheidung mit eigenen Leitplanken (Selbstverstärkung begrenzen,
+        Event-Zeit statt Wall-Clock, abschaltbar, explizites Feedback gewinnt).
+
+        Achtung: nutzt ``time.time()`` (Wall-Clock) und wäre im Replay damit
+        unsichtbar/untestbar — vor einer echten Aktivierung erst auf Event-Zeit
+        umstellen.
+        """
         now = time.time()
         to_remove = []
         for entity_id, action in list(self.own_actions.items()):
