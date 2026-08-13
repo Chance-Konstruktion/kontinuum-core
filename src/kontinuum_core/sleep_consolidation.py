@@ -1,0 +1,359 @@
+"""
+Sleep Consolidation – Hippocampaler Replay & Gedächtnis-Konsolidierung.
+
+Biologisches Vorbild: Im Schlaf (oder bei Abwesenheit) werden Muster
+des Tages "wiedergespielt" und konsolidiert. Starke Muster werden
+verstärkt, schwache vergessen, neue Cerebellum-Regeln extrahiert.
+
+Neu in v0.20.0:
+- Dream Replay: Kreative Rekombination von Mustern über Kontexte hinweg
+  (biologisch: REM-Schlaf verknüpft entfernte Erinnerungen)
+- Synaptic Homeostasis (SHY): Proportionale Herunterskalierung aller
+  Gewichte nach intensiven Lernphasen (verhindert Sättigung)
+
+Läuft in ruhigen Phasen (wenige Events) oder nachts automatisch.
+Extrem ressourcenschonend: max 1x pro Stunde, nur wenn nötig.
+
+Zeit-Basis: alle Gates rechnen in **Event-Zeit** (die aktuelle Event-Zeit wird
+an ``should_consolidate``/``consolidate`` übergeben), nicht in Wall-Clock.
+Dadurch verhält sich Consolidation in Echtzeit UND im Replay/Backtest identisch
+und ist testbar. Zusätzlich zum Quiet-Pfad gibt es einen Fallback-Trigger
+(``MAX_EVENTS_BEFORE_FORCED`` / ``MAX_INTERVAL_SECONDS``) als Obergrenze, damit
+auch ein belebter Haushalt ohne echtes Ruhefenster irgendwann konsolidiert —
+ohne den Normalfall (Quiet) aggressiv zu verdrängen.
+"""
+
+import logging
+import random
+import time
+from datetime import datetime, timezone
+
+_LOGGER = logging.getLogger(__name__)
+
+# Konsolidierung läuft wenn:
+# - Letzte Events > QUIET_THRESHOLD Sekunden her
+# - Mindestens MIN_EVENTS seit letzter Konsolidierung
+# - Max alle COOLDOWN_SECONDS
+QUIET_THRESHOLD = 1800       # 30 Min ohne Events = "ruhig"
+MIN_EVENTS_FOR_CONSOLIDATION = 50
+COOLDOWN_SECONDS = 3600      # Max 1x pro Stunde
+# Fallback-Trigger ("Notausgang"): auch ohne perfektes Ruhefenster konsolidieren,
+# wenn seit der letzten Konsolidierung zu viele Events ODER zu viel Event-Zeit
+# vergangen ist. Obergrenze, nicht Normalfall — der Quiet-Pfad bleibt bevorzugt,
+# damit nie mitten in einer belebten Phase aggressiv konsolidiert wird.
+MAX_EVENTS_BEFORE_FORCED = 500      # so viele Events erzwingen Konsolidierung
+MAX_INTERVAL_SECONDS = 86400        # 24 h Event-Zeit erzwingen Konsolidierung
+DECAY_BOOST_FACTOR = 1.5     # Schwache Muster stärker vergessen
+REINFORCE_FACTOR = 1.08      # Starke Muster leicht verstärken
+DREAM_CROSS_CONTEXT_PAIRS = 10  # Anzahl der Cross-Context-Paare pro Dream Replay
+
+
+class SleepConsolidation:
+    """Konsolidiert Muster in ruhigen Phasen."""
+
+    def __init__(self, rng=None):
+        # Dream replay (Phase 4) samples context pairs at random. Use an
+        # injectable RNG so consolidation is deterministic when needed
+        # (replay/backtest quality gates) and never perturbs — or depends on —
+        # the caller's global ``random`` stream. Defaults to the global module
+        # for normal runtime use.
+        self._rng = rng if rng is not None else random
+        self.last_consolidation_ts = 0.0
+        self.events_since_last = 0
+        self.total_consolidations = 0
+        self.last_patterns_pruned = 0
+        self.last_patterns_reinforced = 0
+        self.last_rules_extracted = 0
+        self.last_dream_connections = 0
+        self.last_homeostasis_factor = 1.0
+        self.total_dream_connections = 0
+
+    def observe_event(self):
+        """Zählt Events seit letzter Konsolidierung."""
+        self.events_since_last += 1
+
+    def should_consolidate(self, now_ts: float, last_event_ts: float) -> bool:
+        """Prüft ob konsolidiert werden soll.
+
+        Rechnet vollständig in **Event-Zeit** (``now_ts`` = aktuelle Event-Zeit,
+        ``last_event_ts`` = Event-Zeit des vorigen Events, beide als Epoch-Float).
+        Dadurch verhält sich das Gate in Echtzeit und im Replay/Backtest
+        identisch — in realer HA sind Event-Timestamps ohnehin ~Wall-Clock.
+
+        Gates:
+        * Cooldown: höchstens 1×/``COOLDOWN_SECONDS``.
+        * Min-Events: mindestens ``MIN_EVENTS_FOR_CONSOLIDATION`` seit dem letzten Lauf.
+        * Quiet: bevorzugter Normalfall — ≥``QUIET_THRESHOLD`` ohne Events.
+        * Fallback ("Notausgang"): erzwingt einen Lauf auch ohne Ruhefenster,
+          sobald ``MAX_EVENTS_BEFORE_FORCED`` Events ODER ``MAX_INTERVAL_SECONDS``
+          Event-Zeit seit der letzten Konsolidierung überschritten sind.
+        """
+        # Cooldown einhalten (gilt auch für den Fallback)
+        if now_ts - self.last_consolidation_ts < COOLDOWN_SECONDS:
+            return False
+
+        # Genug Events gesammelt?
+        if self.events_since_last < MIN_EVENTS_FOR_CONSOLIDATION:
+            return False
+
+        # Fallback-Trigger: zu viele Events oder zu viel Event-Zeit seit dem
+        # letzten Lauf → konsolidieren, auch ohne perfektes Ruhefenster. Das
+        # Interval-Limit gilt erst nach der ersten Konsolidierung, damit ein
+        # frischer Zustand (last_consolidation_ts == 0) nicht sofort forciert.
+        if self.events_since_last >= MAX_EVENTS_BEFORE_FORCED:
+            return True
+        if (self.last_consolidation_ts > 0
+                and (now_ts - self.last_consolidation_ts) >= MAX_INTERVAL_SECONDS):
+            return True
+
+        # Ruhige Phase? (lang genug keine Events) — bevorzugter Normalfall
+        if last_event_ts > 0 and (now_ts - last_event_ts) < QUIET_THRESHOLD:
+            return False
+
+        return True
+
+    def consolidate(self, hippocampus, cerebellum, basal_ganglia=None,
+                    neurorhythms=None, bdnf=None, now_ts=None):
+        """
+        Führt die Konsolidierung durch:
+        1. Hippocampus: Schwache Muster stärker vergessen, starke verstärken
+           (BDNF-geschützte, bewährte Muster werden nicht gelöscht, sondern
+           auf einem Mindestgewicht gehalten – Use-Dependent Protection)
+        2. Dream Replay: Kreative Rekombination von Mustern über Kontexte
+        3. Cerebellum: Regeln neu extrahieren aus aktuellem Wissen
+        4. Basalganglien: Q-Values leicht in Richtung Mittelwert ziehen
+        5. Synaptic Homeostasis: Alle Gewichte proportional herunterskalieren
+
+        Returns dict mit Statistiken.
+
+        ``now_ts`` ist die aktuelle **Event-Zeit** (Epoch-Float); fehlt sie,
+        wird auf die Wall-Clock zurückgefallen (ein Ort, konsistent). Cooldown-
+        und Fallback-Gates in ``should_consolidate`` rechnen gegen diesen Wert.
+        """
+        if now_ts is None:
+            now_ts = time.time()
+        self.last_consolidation_ts = now_ts
+        events_processed = self.events_since_last
+        self.events_since_last = 0
+        self.total_consolidations += 1
+
+        stats = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "events_processed": events_processed,
+            "patterns_pruned": 0,
+            "patterns_reinforced": 0,
+            "rules_extracted": 0,
+            "q_values_smoothed": 0,
+            "dream_connections": 0,
+            "homeostasis_factor": 1.0,
+        }
+
+        # ── Phase 1: Hippocampus Replay ──
+        # Schwache Transitions stärker vergessen, starke leicht verstärken.
+        # Struktur: transitions[bucket][ngram][token_id] = weight, mit
+        # totals[bucket][ngram] = Σ weights — totals werden konsistent
+        # nachgezogen, damit predict() (count/(total+SMOOTHING)) korrekt bleibt.
+        if hippocampus and hasattr(hippocampus, "transitions"):
+            pruned = 0
+            reinforced = 0
+            protected = 0
+
+            for bucket, ngram_dict in hippocampus.transitions.items():
+                empty_ngrams = []
+                for ngram, token_counts in ngram_dict.items():
+                    to_remove = []
+                    for tok, count in list(token_counts.items()):
+                        if count < 1.5:
+                            # Schwaches Muster → stärker vergessen
+                            new_count = count / DECAY_BOOST_FACTOR
+                            if new_count < 0.3:
+                                if bdnf is not None and bdnf.is_protected(tok):
+                                    # BDNF: bewährtes Muster nicht löschen,
+                                    # sondern auf Mindestgewicht halten.
+                                    token_counts[tok] = max(new_count, 0.5)
+                                    protected += 1
+                                else:
+                                    to_remove.append(tok)
+                                    pruned += 1
+                            else:
+                                token_counts[tok] = new_count
+                        elif count > 5.0:
+                            # Starkes Muster → leicht verstärken (Replay)
+                            token_counts[tok] = min(count * REINFORCE_FACTOR, count + 2.0)
+                            reinforced += 1
+                    for tok in to_remove:
+                        del token_counts[tok]
+                    if token_counts:
+                        hippocampus.totals[bucket][ngram] = sum(token_counts.values())
+                    else:
+                        empty_ngrams.append(ngram)
+                for ngram in empty_ngrams:
+                    del ngram_dict[ngram]
+                    hippocampus.totals[bucket].pop(ngram, None)
+
+            stats["patterns_pruned"] = pruned
+            stats["patterns_reinforced"] = reinforced
+            stats["patterns_protected"] = protected
+            self.last_patterns_pruned = pruned
+            self.last_patterns_reinforced = reinforced
+
+        # ── Phase 2: Cerebellum Rule Re-Extraction ──
+        # Bestehende Regeln updaten basierend auf aktuellem Hippocampus-Wissen
+        if cerebellum and hippocampus:
+            try:
+                rules_before = len(getattr(cerebellum, "rules", {}))
+                cerebellum.compile_rules(hippocampus)
+                rules_after = len(getattr(cerebellum, "rules", {}))
+                stats["rules_extracted"] = max(0, rules_after - rules_before)
+                self.last_rules_extracted = stats["rules_extracted"]
+            except Exception:
+                _LOGGER.debug("Cerebellum rule extraction during consolidation failed", exc_info=True)
+
+        # ── Phase 3: Basalganglien Q-Value Smoothing ──
+        # Extreme Q-Values leicht in Richtung Mittelwert ziehen (verhindert dass
+        # einzelne zufällige Belohnungen dominieren). Die LIVE-Pipeline nutzt den
+        # flachen q_values-Dict ("bucket:token" → float), nicht q_table.
+        if basal_ganglia and getattr(basal_ganglia, "q_values", None):
+            smoothed = 0
+            q_values = basal_ganglia.q_values
+            all_values = [v for v in q_values.values() if isinstance(v, (int, float))]
+            if all_values:
+                mean_q = sum(all_values) / len(all_values)
+                smooth_rate = 0.05  # 5% Richtung Mittelwert
+                for key in list(q_values.keys()):
+                    q_val = q_values[key]
+                    if isinstance(q_val, (int, float)):
+                        new_val = q_val + smooth_rate * (mean_q - q_val)
+                        if abs(new_val - q_val) > 0.001:
+                            q_values[key] = round(new_val, 6)
+                            smoothed += 1
+
+            stats["q_values_smoothed"] = smoothed
+
+        # ── Phase 4: Dream Replay (kreative Rekombination) ──
+        # Biologisches Vorbild: REM-Schlaf verknüpft Muster aus verschiedenen
+        # Kontexten. "Was wenn Muster aus dem Wohnzimmer auch im Büro gilt?"
+        # → Stärkt Generalisierung, entdeckt verborgene Zusammenhänge.
+        dream_connections = 0
+        if hippocampus and hasattr(hippocampus, "transitions"):
+            try:
+                buckets = list(hippocampus.transitions.keys())
+                if len(buckets) >= 2:
+                    pairs_tried = 0
+                    for _ in range(DREAM_CROSS_CONTEXT_PAIRS):
+                        b1, b2 = self._rng.sample(buckets, 2)
+                        ngrams_1 = hippocampus.transitions.get(b1, {})
+                        ngrams_2 = hippocampus.transitions.get(b2, {})
+                        if not ngrams_1 or not ngrams_2:
+                            continue
+
+                        # Finde gemeinsame starke Token in beiden Kontexten
+                        # (Token die in verschiedenen Kontexten auftreten = generalisierbar)
+                        tokens_1 = {}
+                        for ngram, token_counts in ngrams_1.items():
+                            for tok, cnt in token_counts.items():
+                                if cnt > 3.0:  # Nur starke Muster
+                                    tokens_1[tok] = tokens_1.get(tok, 0) + cnt
+
+                        for ngram, token_counts in ngrams_2.items():
+                            for tok, cnt in token_counts.items():
+                                if cnt > 3.0 and tok in tokens_1:
+                                    # Gemeinsames starkes Token! → leicht Cross-Verstärken
+                                    boost = min(0.5, (tokens_1[tok] + cnt) * 0.02)
+                                    token_counts[tok] = cnt + boost
+                                    # Auch im anderen Kontext leicht boosten
+                                    for ng1, tc1 in ngrams_1.items():
+                                        if tok in tc1:
+                                            tc1[tok] = tc1[tok] + boost * 0.5
+                                            break
+                                    dream_connections += 1
+
+                        pairs_tried += 1
+                        if pairs_tried >= DREAM_CROSS_CONTEXT_PAIRS:
+                            break
+
+            except Exception:
+                _LOGGER.debug("Dream replay failed", exc_info=True)
+
+        stats["dream_connections"] = dream_connections
+        self.last_dream_connections = dream_connections
+        self.total_dream_connections += dream_connections
+
+        # ── Phase 5: Synaptic Homeostasis (SHY) ──
+        # Proportionale Herunterskalierung aller Gewichte nach intensivem Lernen.
+        # Verhindert Sättigung, erhält Signal-Rausch-Verhältnis.
+        homeostasis_factor = 1.0
+        if neurorhythms:
+            homeostasis_factor = neurorhythms.compute_homeostasis_factor()
+            if homeostasis_factor < 0.99:
+                # Hippocampus-Gewichte skalieren
+                if hippocampus and hasattr(hippocampus, "transitions"):
+                    for bucket_dict in hippocampus.transitions.values():
+                        for ngram, token_counts in bucket_dict.items():
+                            for tok in token_counts:
+                                token_counts[tok] *= homeostasis_factor
+                    # Auch Totals skalieren
+                    if hasattr(hippocampus, "totals"):
+                        for bucket_dict in hippocampus.totals.values():
+                            for ngram in bucket_dict:
+                                bucket_dict[ngram] *= homeostasis_factor
+
+                _LOGGER.info(
+                    "Synaptic Homeostasis: factor=%.3f (alle Gewichte skaliert)",
+                    homeostasis_factor,
+                )
+            neurorhythms.reset_homeostasis()
+
+        stats["homeostasis_factor"] = round(homeostasis_factor, 3)
+        self.last_homeostasis_factor = homeostasis_factor
+
+        # ── Phase 6: Neurotrophic decay (BDNF) ──
+        # Trophic support fades once per consolidation, so a routine that stops
+        # being used / rewarded eventually drops below the protection threshold
+        # and rejoins normal forgetting. Use stays protected; disuse lets go.
+        if bdnf is not None:
+            bdnf.decay_all()
+
+        # ── Final consistency pass ──
+        # totals[bucket][ngram] is a derived cache of Σ transition weights.
+        # Phase 4 (dream replay) boosts individual transitions directly, so
+        # rebuild totals once at the end to keep predict() (count/(total+k))
+        # exact regardless of which phase touched the weights.
+        if hippocampus and hasattr(hippocampus, "transitions"):
+            for bucket, ngram_dict in hippocampus.transitions.items():
+                for ngram, token_counts in ngram_dict.items():
+                    hippocampus.totals[bucket][ngram] = sum(token_counts.values())
+
+        _LOGGER.info(
+            "Sleep consolidation complete: pruned=%d, reinforced=%d, rules=%d, "
+            "q_smooth=%d, dreams=%d, homeostasis=%.3f",
+            stats["patterns_pruned"], stats["patterns_reinforced"],
+            stats["rules_extracted"], stats["q_values_smoothed"],
+            stats["dream_connections"], homeostasis_factor,
+        )
+
+        return stats
+
+    def to_dict(self) -> dict:
+        return {
+            "last_consolidation_ts": self.last_consolidation_ts,
+            "events_since_last": self.events_since_last,
+            "total_consolidations": self.total_consolidations,
+            "last_patterns_pruned": self.last_patterns_pruned,
+            "last_patterns_reinforced": self.last_patterns_reinforced,
+            "last_rules_extracted": self.last_rules_extracted,
+            "last_dream_connections": self.last_dream_connections,
+            "last_homeostasis_factor": self.last_homeostasis_factor,
+            "total_dream_connections": self.total_dream_connections,
+        }
+
+    def from_dict(self, data: dict):
+        self.last_consolidation_ts = data.get("last_consolidation_ts", 0.0)
+        self.events_since_last = data.get("events_since_last", 0)
+        self.total_consolidations = data.get("total_consolidations", 0)
+        self.last_patterns_pruned = data.get("last_patterns_pruned", 0)
+        self.last_patterns_reinforced = data.get("last_patterns_reinforced", 0)
+        self.last_rules_extracted = data.get("last_rules_extracted", 0)
+        self.last_dream_connections = data.get("last_dream_connections", 0)
+        self.last_homeostasis_factor = data.get("last_homeostasis_factor", 1.0)
+        self.total_dream_connections = data.get("total_dream_connections", 0)
