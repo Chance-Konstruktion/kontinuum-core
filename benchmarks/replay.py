@@ -134,6 +134,22 @@ class BenchmarkResult:
     f1: float = 0.0
     labels: List[int] = field(default_factory=list)
     scores: List[float] = field(default_factory=list)
+    # Die tatsaechlich gesetzten Flags. Ohne sie laesst sich die
+    # Fehlalarm-Seite gar nicht messen: Precision braucht Anomalien, und
+    # ein ruhiges Zuhause hat keine. Genau dafuer ist die untere Klammer
+    # da -- und genau das war bisher nicht pruefbar.
+    flags: List[bool] = field(default_factory=list)
+
+    @property
+    def false_alarm_rate(self) -> float:
+        """Anteil der normalen Ereignisse, die faelschlich Alarm ausloesen.
+
+        Anders als Precision auch dann definiert, wenn es ueberhaupt keine
+        Anomalien gibt -- und das ist der Fall, den die untere Klammer
+        schuetzen soll.
+        """
+        normal = [f for f, l in zip(self.flags, self.labels) if l == 0]
+        return sum(normal) / len(normal) if normal else 0.0
 
     def report(self) -> str:
         return (
@@ -148,7 +164,35 @@ class BenchmarkResult:
 
 
 def run_benchmark(train_days: int = 40, eval_days: int = 12,
-                  start: datetime | None = None) -> BenchmarkResult:
+                  start: datetime | None = None,
+                  jitter_minutes: int = 0, with_anomalies: bool = True,
+                  seed: int = 7) -> BenchmarkResult:
+    """Replay-Benchmark. Zwei Schalter, die vorher gefehlt haben.
+
+    ``jitter_minutes`` streut die Routine in der Auswertung um bis zu
+    N Minuten -- gelernt wird weiter auf die Minute genau. Das ist ein
+    unruhiges, aber voellig normales Zuhause: mal fuenf Minuten spaeter
+    ins Bad. Nichts davon ist eine Anomalie.
+
+    ``with_anomalies=False`` spielt gar keine Anomalien ein.
+
+    Beides zusammen macht die **Fehlalarm-Seite** ueberhaupt erst
+    messbar. Bisher lief hier immer dieselbe glatte Routine mit
+    eingestreuten Anomalien -- und Precision ist ohne Anomalien nicht
+    definiert. Die untere Klammer ANOMALY_MIN_THRESHOLD existiert genau
+    fuer diesen Fall, und ihr Nutzen war damit nie nachpruefbar.
+
+    Die Streuung ist geseedet: gleicher ``seed``, gleiches Ergebnis.
+    """
+    import random as _random
+
+    wuerfel = _random.Random(seed)
+
+    def _versatz() -> timedelta:
+        if not jitter_minutes:
+            return timedelta(0)
+        return timedelta(minutes=wuerfel.randint(-jitter_minutes, jitter_minutes))
+
     engine = _build_engine()
     start = start or datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
 
@@ -165,18 +209,19 @@ def run_benchmark(train_days: int = 40, eval_days: int = 12,
     flags: List[bool] = []
     for _ in range(eval_days):
         for hh, mm, room in ROUTINE:
-            for snap in _emit(engine, room, day.replace(hour=hh, minute=mm)):
+            for snap in _emit(engine, room,
+                              day.replace(hour=hh, minute=mm) + _versatz()):
                 labels.append(0)
                 scores.append(snap.surprise)
                 flags.append(snap.anomaly)
-        for hh, mm, room in ANOMALIES:
+        for hh, mm, room in (ANOMALIES if with_anomalies else []):
             for snap in _emit(engine, room, day.replace(hour=hh, minute=mm)):
                 labels.append(1)
                 scores.append(snap.surprise)
                 flags.append(snap.anomaly)
         day += timedelta(days=1)
 
-    res = BenchmarkResult(labels=labels, scores=scores)
+    res = BenchmarkResult(labels=labels, scores=scores, flags=flags)
     norm = [s for s, l in zip(scores, labels) if l == 0]
     anom = [s for s, l in zip(scores, labels) if l == 1]
     res.n_normal, res.n_anomaly = len(norm), len(anom)

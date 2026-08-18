@@ -50,10 +50,26 @@ ANOMALY_MAD_FACTOR = 3.0
 MAD_TO_STD = 1.4826
 # Untergrenze: in einem gut gelernten Zuhause sind Surprise-Werte klein
 # (~0.07 normal). Der alte Boden 0.55 lag weit darüber → der Anomalie-Flag
-# feuerte praktisch nie (Recall ~0.06 im Replay-Benchmark). 0.10 hält ein
-# Mindestsignal (kein Feuern auf Mikrorauschen), lässt aber echte
-# Kontextverletzungen durch.
-ANOMALY_MIN_THRESHOLD = 0.10
+# feuerte praktisch nie (Recall ~0.06 im Replay-Benchmark).
+#
+# 0.10 war der zweite Versuch und die Ursache von Issue #1: Der Boden lag
+# damit MITTEN in der Anomalie-Wolke. Gemessen (benchmarks/untere_klammer.py):
+#
+#   Klammer  Recall  Precision  knappe Fälle
+#     0.060  1.0000     1.0000             0
+#     0.070  1.0000     1.0000             1
+#     0.100  0.7778     1.0000            24   <- vorher
+#
+# "Knappe Fälle" sind Anomalien, die höchstens 0.01 von der Schwelle
+# entfernt liegen. Über die entscheidet nicht die Erkennung, sondern die
+# letzte Nachkommastelle — deshalb lieferte derselbe Code auf Linux 0.5556
+# und auf Windows 0.7778 bis 0.9028, bei identischer AUC.
+#
+# Der Boden hat dabei nicht nur schlecht gelegen, er hat den Mechanismus
+# ausgehebelt: Bei 0.10 wurde in 20 % aller Entscheidungen der berechnete
+# Median+MAD-Wert von der Klammer überschrieben, bei 0.07 nur noch in
+# 7,8 %. Die adaptive Schwelle war zu einem guten Teil gar nicht adaptiv.
+ANOMALY_MIN_THRESHOLD = 0.07
 ANOMALY_MAX_THRESHOLD = 0.95
 ANOMALY_DEFAULT_THRESHOLD = 0.7
 ANOMALY_MIN_SAMPLES = 30
