@@ -93,3 +93,53 @@ def test_engine_detects_and_readapts_to_concept_drift():
     # ...all the way back to roughly the old steady state.
     assert d.adapted <= d.baseline * 1.5, (
         f"re-adaptation incomplete: adapted={d.adapted:.3f} baseline={d.baseline:.3f}")
+
+
+def test_a_restless_but_normal_home_does_not_set_off_the_flag():
+    """The other side of the coin -- and the one nobody could measure.
+
+    Every run of this benchmark used to play the same routine to the
+    minute, with anomalies mixed in. Precision needs anomalies to be
+    defined, so a home with none was not expressible at all. And that is
+    exactly the home ``ANOMALY_MIN_THRESHOLD`` was introduced for.
+
+    The consequence: the whole suite passed with the floor at 0.0. The
+    upper side was guarded, the lower side was not, and the constant that
+    caused issue #1 could be moved anywhere without a test objecting.
+
+    Here the routine wanders by up to twenty minutes -- somebody sleeping
+    in, a late bath. Nothing is an anomaly. The measured rate is 3.8%;
+    the budget leaves room without letting the detector become jumpy.
+    """
+    res = run_benchmark(train_days=40, eval_days=12,
+                        jitter_minutes=20, with_anomalies=False)
+
+    assert res.n_normal > 200, (
+        f"only {res.n_normal} normal events -- with nothing to count, a "
+        "false-alarm rate of 0.0 means nothing. This guard exists because "
+        "three measurements in a row read 0.000 from an empty list"
+    )
+    assert res.n_anomaly == 0, "with_anomalies=False still injected anomalies"
+
+    assert res.false_alarm_rate <= 0.05, (
+        f"false alarms on a normal-but-restless home: "
+        f"{res.false_alarm_rate:.4f}. The flag is firing on somebody "
+        "sleeping in, and an alarm that cries wolf gets switched off"
+    )
+
+
+def test_the_flag_still_fires_when_something_really_happens():
+    """The non-empty guard for the test above.
+
+    A detector that never fires trivially satisfies a false-alarm budget.
+    Read together, the two tests say: quiet when nothing happens, loud
+    when something does.
+    """
+    res = run_benchmark(train_days=40, eval_days=12, jitter_minutes=20)
+
+    assert res.n_anomaly > 0, "no anomalies injected -- nothing was measured"
+    fired = sum(1 for f, l in zip(res.flags, res.labels) if f and l == 1)
+    assert fired > 0, (
+        "not a single injected anomaly set the flag -- the previous test's "
+        "clean false-alarm rate is worthless"
+    )
