@@ -174,3 +174,15 @@ wackelt-es:
   script:
     - pip install -q -e ".[dev]"
     - python benchmarks/wackelt_es.py
+
+# Voruebergehend: vergleicht Regeln fuer die Untergrenze und misst die
+# Form der Surprise-Verteilung auf DIESER Maschine.
+bodenregel:
+  stage: test
+  image: python:3.13
+  rules:
+    - exists:
+        - benchmarks/bodenregel.py
+  script:
+    - pip install -q -e .
+    - python benchmarks/bodenregel.py
