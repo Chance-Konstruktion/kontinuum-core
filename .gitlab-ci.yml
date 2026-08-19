@@ -151,3 +151,14 @@ fingerabdruck:
   script:
     - pip install -q -e .
     - python benchmarks/fingerabdruck.py
+
+# Voruebergehend: sucht den Test, der Zustand hinterlaesst.
+wer-faerbt-ab:
+  stage: test
+  image: python:3.13
+  rules:
+    - exists:
+        - benchmarks/wer_faerbt_ab.py
+  script:
+    - pip install -q -e ".[dev]"
+    - python benchmarks/wer_faerbt_ab.py
