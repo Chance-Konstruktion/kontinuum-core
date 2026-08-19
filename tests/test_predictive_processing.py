@@ -122,11 +122,17 @@ def test_from_dict_converts_familiarity_keys_to_int():
 def test_anomaly_threshold_default_then_adaptive():
     """Below ANOMALY_MIN_SAMPLES the default applies; afterwards the
     threshold adapts to the home's own surprise distribution and stays
-    within the documented clamp range."""
+    within the documented clamp range.
+
+    The lower clamp is relative (``median x ANOMALY_FLOOR_FACTOR``), so
+    there is no single number to compare against any more. That is the
+    point: a fixed floor was right on exactly one machine three times in
+    a row. What must still hold is the range and the ordering.
+    """
     from kontinuum_core.predictive_processing import (
+        ANOMALY_ABSOLUTE_FLOOR,
         ANOMALY_DEFAULT_THRESHOLD,
         ANOMALY_MAX_THRESHOLD,
-        ANOMALY_MIN_THRESHOLD,
     )
 
     p = PredictiveProcessing()
@@ -136,13 +142,18 @@ def test_anomaly_threshold_default_then_adaptive():
     for _ in range(120):
         p.compute_surprise(token_id=1, predictions=[(1, 1.0, 1.0, "x", 120)])
     quiet = p.anomaly_threshold()
-    assert ANOMALY_MIN_THRESHOLD <= quiet <= ANOMALY_MAX_THRESHOLD
+    assert ANOMALY_ABSOLUTE_FLOOR <= quiet <= ANOMALY_MAX_THRESHOLD
 
     # Chaotic home: constant misses against confident predictions.
     p2 = PredictiveProcessing()
     for i in range(120):
         p2.compute_surprise(token_id=i, predictions=[(99999, 0.9, 1.0, "x", 100)])
     noisy = p2.anomaly_threshold()
-    assert ANOMALY_MIN_THRESHOLD <= noisy <= ANOMALY_MAX_THRESHOLD
+    assert ANOMALY_ABSOLUTE_FLOOR <= noisy <= ANOMALY_MAX_THRESHOLD
+    # Die Obergrenze gilt ueber ALLES, auch ueber den Boden. Beim ersten
+    # Umbau stand sie nur um den adaptiven Teil, und ein chaotisches
+    # Zuhause bekam eine Schwelle von 1.08 -- ausserhalb des
+    # Wertebereichs, damit nie wieder ein Alarm. Der Stresstest hat es
+    # gefangen, dieser Test soll es festhalten.
     # A predictable home must end up with a lower threshold than a chaotic one.
     assert quiet < noisy

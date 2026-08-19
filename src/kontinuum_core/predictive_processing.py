@@ -39,37 +39,79 @@ MAX_LEARN_WEIGHT = 2.5
 
 # Adaptiver Anomalie-Schwellwert (robust gegen Kontamination):
 #   Schwelle = Median + ANOMALY_MAD_FACTOR × (MAD_TO_STD × MAD) der letzten
-#   Surprise-Werte, geklemmt auf [ANOMALY_MIN_THRESHOLD, ANOMALY_MAX_THRESHOLD].
+#   Surprise-Werte -- gerechnet auf der um Auffaellige BEREINIGTEN Historie,
+#   nach unten auf Median x ANOMALY_FLOOR_FACTOR und nach oben auf
+#   ANOMALY_MAX_THRESHOLD begrenzt. Naeheres in anomaly_threshold().
 # Warum Median/MAD statt Mittelwert/Std: Anomalien sind selten und LAUT. In
 # einem Mittelwert+Std-Schätzer heben genau die Ausreißer, die wir flaggen
 # wollen, die Schwelle gegen sich selbst an → der Recall bricht ein. Median und
 # MAD (Median der absoluten Abweichungen) ignorieren die seltenen Spitzen und
 # schätzen das *normale* Surprise-Niveau des Zuhauses; MAD_TO_STD macht aus der
 # MAD einen konsistenten Std-Schätzer für normalverteilte Daten.
-ANOMALY_MAD_FACTOR = 3.0
+# 3.0 stammte aus der Zeit, als Median und MAD noch aus der ganzen
+# Historie kamen -- also inklusive der Anomalien, die die Schwelle gegen
+# sich selbst anhoben. Mit der bereinigten Historie (siehe
+# anomaly_threshold) liegt die Schwelle tiefer und richtiger, und 3.0
+# waere zu streng. Gemessen auf beiden Maschinen:
+#
+#   k     Recall  Precision  Grenzfaelle
+#   1.8   1.0000     1.0000            0
+#   2.0   1.0000     1.0000            0
+#   2.2   1.0000     1.0000            0   <- Mitte des Plateaus
+#   2.5   1.0000     1.0000            0
+#   2.8   0.9861     1.0000           22
+#   3.0   0.9028     1.0000           25
+#
+# 2.2 liegt in der Mitte des flachen Bereichs und nicht an seinem Rand.
+# Ein Wert am Rand ist wieder nur ein gluecklicher Wuerfelwurf -- die
+# Lehre aus 0.55, 0.10 und 0.07.
+ANOMALY_MAD_FACTOR = 2.2
 MAD_TO_STD = 1.4826
-# Untergrenze: in einem gut gelernten Zuhause sind Surprise-Werte klein
-# (~0.07 normal). Der alte Boden 0.55 lag weit darüber → der Anomalie-Flag
-# feuerte praktisch nie (Recall ~0.06 im Replay-Benchmark).
+# Untergrenze — RELATIV, nicht absolut.
 #
-# 0.10 war der zweite Versuch und die Ursache von Issue #1: Der Boden lag
-# damit MITTEN in der Anomalie-Wolke. Gemessen (benchmarks/untere_klammer.py):
+# Die Geschichte dieser Zeile ist eine Kette fester Zahlen: 0.55 (der Flag
+# feuerte praktisch nie), dann 0.10 (Issue #1: der Boden lag mitten in der
+# Anomalie-Wolke), dann 0.07. Jede war auf genau einem Rechner gemessen.
 #
-#   Klammer  Recall  Precision  knappe Fälle
-#     0.060  1.0000     1.0000             0
-#     0.070  1.0000     1.0000             1
-#     0.100  0.7778     1.0000            24   <- vorher
+# Denn die Beträge wandern. Derselbe Code, dieselben Seeds, dieselbe AUC
+# auf sechs Stellen (0.9996) — und trotzdem:
 #
-# "Knappe Fälle" sind Anomalien, die höchstens 0.01 von der Schwelle
-# entfernt liegen. Über die entscheidet nicht die Erkennung, sondern die
-# letzte Nachkommastelle — deshalb lieferte derselbe Code auf Linux 0.5556
-# und auf Windows 0.7778 bis 0.9028, bei identischer AUC.
+#                        Windows/3.14   Linux/3.13
+#   Median normal            0.0814       0.0575
+#   MAD normal               0.0110       0.0107
+#   Median Anomalie          0.1372       0.1301
+#   Abstand unterste Anom.   1.39 MAD     2.48 MAD
 #
-# Der Boden hat dabei nicht nur schlecht gelegen, er hat den Mechanismus
-# ausgehebelt: Bei 0.10 wurde in 20 % aller Entscheidungen der berechnete
-# Median+MAD-Wert von der Klammer überschrieben, bei 0.07 nur noch in
-# 7,8 %. Die adaptive Schwelle war zu einem guten Teil gar nicht adaptiv.
-ANOMALY_MIN_THRESHOLD = 0.07
+# Die Streuung ist gleich, die Anomalien liegen fast gleich — aber die
+# NORMALEN Ereignisse liegen auf Windows höher. Der Abstand zwischen
+# normal und auffällig ist dort nur halb so groß. Eine feste Zahl schneidet
+# deshalb an verschiedenen Stellen durch dieselbe Rangliste.
+#
+# Der Boden ist dabei NICHT der Hebel, auch wenn drei Anläufe an ihm
+# gedreht haben. Gemessen mit der bereinigten Schwelle (k = 2.2):
+#
+#   Boden              Recall  Precision  Grenzfaelle
+#   nur 0.02           1.0000     1.0000            0
+#   fest 0.07          1.0000     1.0000            0
+#   Median × 1.2       1.0000     1.0000            0
+#   Median × 1.5       1.0000     1.0000           13
+#
+# Bis × 1.2 greift er in diesem Zuhause gar nicht -- er ist reine
+# Vorsorge fuer ein sehr starres. Ab × 1.5 wird er bindend und landet in
+# der Anomalie-Wolke: dieselbe Falle wie 0.10 damals, nur relativ
+# formuliert. Deshalb × 1.2 und keine "sichere" Reserve obendrauf.
+#
+# Ein Perzentil wäre der naheliegende Griff und ist der falsche: Es setzt
+# eine feste Anomalierate voraus. Im Benchmark sind 21 % der Ereignisse
+# auffällig, in einem echten Zuhause weit unter 1 % — dasselbe Perzentil
+# liegt einmal mitten in der Wolke und einmal mitten im Normalen.
+ANOMALY_FLOOR_FACTOR = 1.2
+
+# Reiner Schutz gegen Null, keine Kalibrierung: In einem vollkommen
+# starren Zuhause wäre der Median 0 und damit auch der relative Boden —
+# dann wäre jedes Ereignis eine Anomalie. Diese Zahl darf niemandem als
+# Stellschraube dienen; wer hier dreht, dreht am falschen Ende.
+ANOMALY_ABSOLUTE_FLOOR = 0.02
 ANOMALY_MAX_THRESHOLD = 0.95
 ANOMALY_DEFAULT_THRESHOLD = 0.7
 ANOMALY_MIN_SAMPLES = 30
@@ -205,15 +247,48 @@ class PredictiveProcessing:
         selbst an). Ein lautes/chaotisches Zuhause hebt die Schwelle, ein
         sehr vorhersagbares senkt sie bis auf die Untergrenze. Vor
         ANOMALY_MIN_SAMPLES Beobachtungen gilt der Default.
+
+        Die Untergrenze ist **relativ**: ``Median x ANOMALY_FLOOR_FACTOR``.
+        Eine feste Zahl dort war dreimal in Folge auf genau einem Rechner
+        richtig -- die Surprise-Betraege wandern zwischen Plattformen,
+        die Rangfolge nicht. Naeheres oben bei der Konstante.
         """
         n = len(self.surprise_history)
         if n < ANOMALY_MIN_SAMPLES:
             return ANOMALY_DEFAULT_THRESHOLD
         data = list(self.surprise_history)
+
+        # Zwei Durchgänge. Median und MAD sind robust gegen einzelne
+        # Ausreißer, aber nicht gegen 20 % davon: In der Historie stehen
+        # auch die Anomalien, und sie heben die Schwelle gegen sich
+        # selbst an. Genau das war die Ursache des Plattform-Unterschieds
+        # — wie viele Auffällige gerade im Fenster stehen, entscheidet
+        # über die Schwelle, und das schwankt.
+        #
+        # Der erste Durchgang liefert eine grobe Trennung, der zweite
+        # rechnet nur noch mit dem, was darunter liegt: dem *normalen*
+        # Niveau dieses Zuhauses.
         med = median(data)
         mad = median([abs(x - med) for x in data])
+        grob = med + ANOMALY_MAD_FACTOR * MAD_TO_STD * mad
+
+        # `or data`: Liegt nichts unter der groben Schwelle, ist das
+        # Fenster zu klein oder alles gleich laut. Dann mit allem
+        # weiterrechnen statt mit einer leeren Liste — median([]) wirft,
+        # und ein Absturz an dieser Stelle sähe aus wie ein Datenfehler.
+        ruhig = [x for x in data if x < grob] or data
+        med = median(ruhig)
+        mad = median([abs(x - med) for x in ruhig])
         threshold = med + ANOMALY_MAD_FACTOR * MAD_TO_STD * mad
-        return max(ANOMALY_MIN_THRESHOLD, min(ANOMALY_MAX_THRESHOLD, threshold))
+        # Der Boden wandert mit dem Niveau des Zuhauses mit. Eine feste
+        # Zahl hier hat dreimal in Folge auf genau einem Rechner gepasst.
+        floor = max(ANOMALY_ABSOLUTE_FLOOR, med * ANOMALY_FLOOR_FACTOR)
+        # Die Obergrenze zuletzt, und ueber ALLES. Beim ersten Versuch
+        # stand sie nur um den adaptiven Teil -- in einem chaotischen
+        # Zuhause (Median 0.72) hob der Boden die Schwelle auf 1.08, ueber
+        # den Wertebereich hinaus. Dort ist kein Ereignis mehr auffaellig,
+        # und der Flag waere still ausgegangen.
+        return min(ANOMALY_MAX_THRESHOLD, max(floor, threshold))
 
     def get_average_surprise(self) -> float:
         """Durchschnittliches Surprise-Level der letzten 100 Events."""

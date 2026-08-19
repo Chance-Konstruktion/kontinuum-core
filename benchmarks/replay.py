@@ -139,6 +139,14 @@ class BenchmarkResult:
     # ein ruhiges Zuhause hat keine. Genau dafuer ist die untere Klammer
     # da -- und genau das war bisher nicht pruefbar.
     flags: List[bool] = field(default_factory=list)
+    # Die Schwelle, die in JEDEM Moment tatsaechlich galt.
+    #
+    # Frueher verglich der Grenzfall-Test gegen die Konstante
+    # ANOMALY_MIN_THRESHOLD. Seit die Untergrenze relativ ist, gibt es
+    # keine Konstante mehr -- und ohne diese Liste liesse sich gar nicht
+    # mehr feststellen, wie knapp eine Entscheidung war. Eine Pruefung,
+    # die ihren Bezugspunkt verliert, wird stillschweigend wertlos.
+    thresholds: List[float] = field(default_factory=list)
 
     @property
     def false_alarm_rate(self) -> float:
@@ -207,6 +215,7 @@ def run_benchmark(train_days: int = 40, eval_days: int = 12,
     labels: List[int] = []
     scores: List[float] = []
     flags: List[bool] = []
+    schwellen: List[float] = []
     for _ in range(eval_days):
         for hh, mm, room in ROUTINE:
             for snap in _emit(engine, room,
@@ -214,14 +223,17 @@ def run_benchmark(train_days: int = 40, eval_days: int = 12,
                 labels.append(0)
                 scores.append(snap.surprise)
                 flags.append(snap.anomaly)
+                schwellen.append(snap.extra.get("anomaly_threshold", 0.0))
         for hh, mm, room in (ANOMALIES if with_anomalies else []):
             for snap in _emit(engine, room, day.replace(hour=hh, minute=mm)):
                 labels.append(1)
                 scores.append(snap.surprise)
                 flags.append(snap.anomaly)
+                schwellen.append(snap.extra.get("anomaly_threshold", 0.0))
         day += timedelta(days=1)
 
-    res = BenchmarkResult(labels=labels, scores=scores, flags=flags)
+    res = BenchmarkResult(labels=labels, scores=scores, flags=flags,
+                          thresholds=schwellen)
     norm = [s for s, l in zip(scores, labels) if l == 0]
     anom = [s for s, l in zip(scores, labels) if l == 1]
     res.n_normal, res.n_anomaly = len(norm), len(anom)
