@@ -162,3 +162,15 @@ wer-faerbt-ab:
   script:
     - pip install -q -e ".[dev]"
     - python benchmarks/wer_faerbt_ab.py
+
+# Voruebergehend: laeuft die Suite zwoelfmal, um Wackeln von Kaputtsein
+# zu trennen.
+wackelt-es:
+  stage: test
+  image: python:3.13
+  rules:
+    - exists:
+        - benchmarks/wackelt_es.py
+  script:
+    - pip install -q -e ".[dev]"
+    - python benchmarks/wackelt_es.py
