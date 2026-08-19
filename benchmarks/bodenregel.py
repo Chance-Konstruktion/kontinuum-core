@@ -64,7 +64,7 @@ def _quantil(werte: list[float], q: float) -> float:
 # Jede Regel bekommt die beobachteten Surprise-Werte und liefert die
 # Untergrenze. `fest` ist der heutige Stand und dient als Vergleich.
 REGELN = {
-    "fest 0.07 (heute)": lambda data, med: 0.07,
+    "fest 0.07 (frueher)": lambda data, med: 0.07,
     "Median x 1.2": lambda data, med: med * 1.2,
     "Median x 1.5": lambda data, med: med * 1.5,
     "Median x 2.0": lambda data, med: med * 2.0,
@@ -89,8 +89,16 @@ def mit_regel(regel):
         if n < pp.ANOMALY_MIN_SAMPLES:
             return pp.ANOMALY_DEFAULT_THRESHOLD
         data = list(self.surprise_history)
+        # Zweistufig, genau wie im Code: erst grob trennen, dann Median
+        # und MAD nur aus den ruhigen Werten. Rechnete dieses Skript
+        # weiter einstufig, verglichen die Zeilen unten Regeln fuer eine
+        # Schwelle, die es so nicht mehr gibt.
         med = median(data)
         mad = median([abs(x - med) for x in data])
+        grob = med + pp.ANOMALY_MAD_FACTOR * pp.MAD_TO_STD * mad
+        ruhig = [x for x in data if x < grob] or data
+        med = median(ruhig)
+        mad = median([abs(x - med) for x in ruhig])
         adaptiv = med + pp.ANOMALY_MAD_FACTOR * pp.MAD_TO_STD * mad
         boden = max(NOTBODEN, regel(data, med))
         wert = min(pp.ANOMALY_MAX_THRESHOLD, max(boden, adaptiv))
@@ -149,9 +157,14 @@ def main() -> int:
             benutzt.clear()
             mit = run_benchmark(train_days=TRAIN_TAGE, eval_days=EVAL_TAGE)
             typisch = median(benutzt) if benutzt else float("nan")
-            anomalien = [s for s, l in zip(mit.scores, mit.labels) if l == 1]
-            knapp = sum(1 for s in anomalien
-                        if abs(s - typisch) <= HAARESBREITE)
+            # Gegen die Schwelle, die in JEDEM Moment galt -- nicht gegen
+            # die typische. Die erste Fassung verglich gegen den Median
+            # aller Schwellen und rechnete das Problem damit klein: Sie
+            # meldete 0 Grenzfaelle, wo es in Wahrheit 31 waren. Eine
+            # Messung, die zu gut aussieht, ist die gefaehrlichste.
+            knapp = sum(1 for s, schwelle, l
+                        in zip(mit.scores, mit.thresholds, mit.labels)
+                        if l == 1 and abs(s - schwelle) <= HAARESBREITE)
 
             ohne = run_benchmark(train_days=TRAIN_TAGE, eval_days=EVAL_TAGE,
                                  jitter_minutes=20, with_anomalies=False)

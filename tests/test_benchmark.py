@@ -44,19 +44,19 @@ def test_anomaly_flag_has_usable_recall_when_converged():
     # digits, same commit. If this ever moves, the model changed.
     assert res.auc > 0.99, f"ranking separation regressed: AUC={res.auc:.4f}"
 
-    # Recall does NOT travel, and the honest bound says so. The same
-    # commit yields 0.694 on Windows/3.14 and 0.958 on Linux/3.13,
-    # because normal events sit higher there (median 0.0814 vs 0.0575)
-    # while the anomalies sit almost equal -- half the separation, same
-    # ranking. That gap is in the model, not in the threshold, and
-    # benchmarks/bodenregel.py has the numbers.
+    # Recall now travels too, and that is the whole point of the fix.
+    # Before it did not: the same commit gave 0.694 here and 0.958 in CI,
+    # because the anomalies in the history raised the threshold against
+    # themselves and how many sat in the window differed. With the
+    # threshold computed on the cleaned history both machines measure
+    # 1.0000 -- see the table at ANOMALY_MAD_FACTOR.
     #
-    # A bound of 0.9 would be green on the CI machine and red here, and
-    # whoever runs the suite on a laptop would learn to ignore it. 0.65
-    # is below both measurements and still far above the 0.06 that the
-    # broken floor produced -- it catches a real collapse and nothing
-    # else. The narrow, portable statement is the AUC line above.
-    assert res.recall >= 0.65, f"anomaly-flag recall regressed: {res.recall:.3f}"
+    # 0.95 and not 1.0: a bound exactly on the measurement turns the next
+    # single missed anomaly into a red build, and nobody can tell a real
+    # regression from the last decimal place any more. 0.95 leaves room
+    # for one miss out of 72 and still catches the 0.06 that the old
+    # floor produced.
+    assert res.recall >= 0.95, f"anomaly-flag recall regressed: {res.recall:.3f}"
 
 
 def test_the_anomaly_threshold_does_not_sit_in_the_anomaly_cloud():
