@@ -66,6 +66,9 @@ pytest:
     expire_in: 30 days
     paths:
       - installierte-pakete.txt
+      # Die Kennzahlen jedes Laufs, auch der gruenen. Der Lauf vor
+      # einem roten ist damit keine Erinnerung mehr, sondern eine Datei.
+      - benchmark-kennzahlen.txt
     reports:
       junit: report.xml
   rules:

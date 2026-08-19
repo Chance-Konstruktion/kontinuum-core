@@ -7,6 +7,8 @@ real regressions (the engine going blind) rather than pinning exact numbers.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from benchmarks.replay import run_benchmark, run_drift_benchmark
 
 
@@ -98,6 +100,42 @@ def test_the_anomaly_threshold_does_not_sit_in_the_anomaly_cloud():
     )
 
     borderline = [s for s, t in anomalies if abs(s - t) <= BORDERLINE]
+
+    # Every run leaves its numbers behind -- the green ones too.
+    #
+    # On 2026-08-19 commit 78da3fd was green on main (pipeline 394) and
+    # red on a branch (435): two borderline cases instead of none. Same
+    # image digest, same Python 3.13.15, same code, six hours apart.
+    #
+    # Ruled out since, each bit-identical across the whole sweep:
+    # PYTHONHASHSEED over ten values, the wall clock frozen at four
+    # different hours, and the calendar day frozen at six different
+    # dates. The pip cache key carried the branch name, so two branches
+    # could resolve different package versions; that key is fixed now.
+    #
+    # And then the honest part. In one sitting this benchmark summed its
+    # scores to 35.406136082 in every single run. Two hours later, same
+    # machine, same files, `git diff` empty against the same commit, it
+    # summed to 31.524128167 -- and has stayed there since, just as
+    # stubbornly. Both states gave zero borderline cases, so this
+    # assertion held either way. Nothing else about either state is
+    # explained.
+    #
+    # So: do not read the constants below as "measured and settled".
+    # They are measured and *watched*. That is what this file is for --
+    # every run, green ones included, leaves its numbers in the job
+    # artifacts. When this goes red again, the run before it is not a
+    # memory, it is a file.
+    Path("benchmark-kennzahlen.txt").write_text(f"""grenzfaelle  {len(borderline)}
+anomalien    {len(anomalies)}
+recall       {res.recall:.6f}
+precision    {res.precision:.6f}
+auc          {res.auc:.6f}
+schwelle_min {min(t for _, t in anomalies):.6f}
+schwelle_max {max(t for _, t in anomalies):.6f}
+score_summe  {sum(res.scores):.9f}
+""", encoding="utf-8")
+
     assert len(borderline) <= BUDGET, (
         f"{len(borderline)} of {len(anomalies)} anomalies lie within "
         f"{BORDERLINE} of the threshold that applied -- those are decided "
