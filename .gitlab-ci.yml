@@ -136,3 +136,18 @@ release:
     description: "Automatisch erzeugt aus Tag $CI_COMMIT_TAG."
   rules:
     - if: $CI_COMMIT_TAG
+
+# ── Fingerabdruck ─────────────────────────────────────────────────────
+# Voruebergehend: Der Benchmark liefert auf zwei Maschinen zwei
+# verschiedene Ergebnisse, aus demselben Commit und mit denselben Seeds.
+# Dieser Job druckt aus, was DIESE Maschine misst -- der Vergleich mit
+# der Ausgabe von Hand zeigt, wo die Wege auseinanderlaufen.
+fingerabdruck:
+  stage: test
+  image: python:3.13
+  rules:
+    - exists:
+        - benchmarks/fingerabdruck.py
+  script:
+    - pip install -q -e .
+    - python benchmarks/fingerabdruck.py
