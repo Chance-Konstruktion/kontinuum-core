@@ -21,8 +21,8 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Chance-Konstruktion/kontinuum-core"
-Issues = "https://github.com/Chance-Konstruktion/kontinuum-core/issues"
+Homepage = "https://gitlab.schanz.ipv64.net/chance-konstruktion/kontinuum-core"
+Issues = "https://gitlab.schanz.ipv64.net/chance-konstruktion/kontinuum-core/-/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]

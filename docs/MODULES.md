@@ -91,7 +91,7 @@ Der Core stellt nur den **Daten-Vertrag** bereit (`kontinuum_core.llm`):
   lassen ein LLM das Zuhause beim Setup beschreiben (Tag-1-Vorsprung).
 
 Die konkrete Cortex-Einrichtung (Agents, Provider inkl. **Custom/OpenAI-kompatibel
-/ OpenCLAW**) ist in [`ha-kontinuum/docs/SETTINGS.md`](https://github.com/Chance-Konstruktion/ha-kontinuum/blob/main/docs/SETTINGS.md) beschrieben.
+/ OpenCLAW**) ist in [`ha-kontinuum/docs/SETTINGS.md`](https://gitlab.schanz.ipv64.net/chance-konstruktion/ha-kontinuum/-/blob/main/docs/SETTINGS.md) beschrieben.
 
 ---
 

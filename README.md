@@ -1,20 +1,20 @@
 # KONTINUUM Core
 
-[![Tests](https://github.com/Chance-Konstruktion/kontinuum-core/actions/workflows/tests.yaml/badge.svg?branch=main)](https://github.com/Chance-Konstruktion/kontinuum-core/actions/workflows/tests.yaml)
+[![Pipeline](https://gitlab.schanz.ipv64.net/chance-konstruktion/kontinuum-core/badges/main/pipeline.svg)](https://gitlab.schanz.ipv64.net/chance-konstruktion/kontinuum-core/-/pipelines)
 [![PyPI version](https://img.shields.io/pypi/v/kontinuum-core.svg)](https://pypi.org/project/kontinuum-core/)
 [![Python versions](https://img.shields.io/pypi/pyversions/kontinuum-core.svg)](https://pypi.org/project/kontinuum-core/)
-[![License: AGPL-3.0](https://img.shields.io/pypi/l/kontinuum-core.svg)](https://github.com/Chance-Konstruktion/kontinuum-core/blob/main/LICENSE)
+[![License: AGPL-3.0](https://img.shields.io/pypi/l/kontinuum-core.svg)](https://gitlab.schanz.ipv64.net/chance-konstruktion/kontinuum-core/-/blob/main/LICENSE)
 
 Pure-Python, neuro-inspired learning engine extracted from
-[KONTINUUM](https://github.com/Chance-Konstruktion/ha-kontinuum). No Home
+[KONTINUUM](https://gitlab.schanz.ipv64.net/chance-konstruktion/ha-kontinuum). No Home
 Assistant dependency — usable from any Python project. **Zero runtime
 dependencies** (standard library only), Python 3.9+.
 
 > **Part of the KONTINUUM family:**
 > **kontinuum-core** (this repo, HA-free Python package on PyPI) ·
-> [`ha-kontinuum`](https://github.com/Chance-Konstruktion/ha-kontinuum) (full HA Pro integration with UI) ·
+> [`ha-kontinuum`](https://gitlab.schanz.ipv64.net/chance-konstruktion/ha-kontinuum) (full HA Pro integration with UI) ·
 > [`ha-kontinuum-lite`](https://github.com/Chance-Konstruktion/ha-kontinuum-lite) (slim HA integration, no UI) ·
-> [`kontinuum-AI-anomaly`](https://github.com/Chance-Konstruktion/kontinuum-AI-anomaly) (anomaly / novelty monitor for **agent action streams**, built on this engine)
+> [`kontinuum-AI-anomaly`](https://gitlab.schanz.ipv64.net/chance-konstruktion/kontinuum-ai-anomaly) (anomaly / novelty monitor for **agent action streams**, built on this engine)
 
 ## Installation
 
@@ -88,7 +88,7 @@ household routine instead of from a blank slate.
 ## Built on top of core
 
 The engine is designed for smart-home event streams, but it is a general
-sequence-learner. [**`kontinuum-AI-anomaly`**](https://github.com/Chance-Konstruktion/kontinuum-AI-anomaly)
+sequence-learner. [**`kontinuum-AI-anomaly`**](https://gitlab.schanz.ipv64.net/chance-konstruktion/kontinuum-ai-anomaly)
 (PyPI: `ai-kontinuum-monitor`) points it at an **AI agent's action log** instead
 and adds the monitor layer core deliberately leaves out — robust scoring,
 anomaly history, alerting (escalation / snooze), a dashboard, multi-agent
