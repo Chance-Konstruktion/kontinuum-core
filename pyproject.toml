@@ -22,7 +22,7 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://gitlab.schanz.ipv64.net/chance-konstruktion/kontinuum-core"
-Issues = "https://gitlab.schanz.ipv64.net/chance-konstruktion/kontinuum-core/-/issues"
+Issues = "https://gitlab.schanz.ipv64.net/chance-konstruktion/kontinuum-core/-/work_items"
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]
