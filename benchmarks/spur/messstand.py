@@ -347,6 +347,38 @@ def messe(spur: Spur, min_train_wochen: int = 4,
     return ergebnis
 
 
+def gepaarte_differenz(ergebnis: MessErgebnis,
+                       gegner: Sequence[str] = ("B0", "B1", "B2")) -> dict:
+    """Die gepaarte Differenz Engine − bester Gegner (Abnahme 13642, Punkt 3).
+
+    „Bester Gegner“ ist der mit der höchsten Median-Top-1-Quote über die
+    Ursprünge; die Differenz wird JE URSPRUNG gebildet und dann als
+    Median [Min–Max] berichtet — so erkennt man einen knappen Sieg als
+    knapp. (Die mittlere Differenz über die bewerteten Paare ist mit der
+    Quotendifferenz identisch; die Paarung ist der gleiche Strom.)"""
+    import statistics
+
+    quoten = {
+        name: statistics.median(
+            [u.systeme[name].trefferquote() for u in ergebnis.ursprunge]
+        )
+        for name in gegner
+    }
+    bester = max(quoten, key=lambda name: (quoten[name], name))
+    differenzen = [
+        u.systeme["Engine"].trefferquote() - u.systeme[bester].trefferquote()
+        for u in ergebnis.ursprunge
+    ]
+    return {
+        "bester_gegner": bester,
+        "gegner_median": quoten[bester],
+        "differenzen": differenzen,
+        "median": statistics.median(differenzen),
+        "min": min(differenzen),
+        "max": max(differenzen),
+    }
+
+
 def _demo() -> int:
     """Kleiner Aufruf zum Anschauen (und fuer die spaetere Tafel):
 
@@ -362,6 +394,10 @@ def _demo() -> int:
     simulation = simuliere(haus_typ, tage=wochen * 7, saat=saat)
     ergebnis = messe(simulation.spur, min_train_wochen=4)
     print(ergebnis.bericht())
+    differenz = gepaarte_differenz(ergebnis)
+    print(f"Gepaarte Differenz (Engine − {differenz['bester_gegner']}): "
+          f"Median {differenz['median']:+.1%} "
+          f"[{differenz['min']:+.1%} .. {differenz['max']:+.1%}]")
     print(f"Spur: roh {simulation.roh_anzahl} -> behalten "
           f"{len(simulation.spur.ereignisse)} (Eimer-Verlust "
           f"{simulation.bericht['eimer_verlust']})")
@@ -385,4 +421,5 @@ __all__ = [
     "registriere_engine",
     "messe_ursprung",
     "messe",
+    "gepaarte_differenz",
 ]

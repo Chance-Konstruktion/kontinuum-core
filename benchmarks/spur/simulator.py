@@ -62,9 +62,13 @@ GERAETE_ENTITAETEN: Sequence[Entitaet] = (
     Entitaet("sensor.aussen_temperatur", "outdoor", "sensor", "temperature"),
     Entitaet("sensor.heizung_leistung", "hauswirtschaft", "sensor", "power"),
     Entitaet("sensor.haus_leistung", "hauswirtschaft", "sensor", "power"),
-    Entitaet("sensor.pv_leistung", "outdoor", "sensor", "solar"),
+    Entitaet("sensor.pv_leistung", "outdoor", "sensor", "power"),  # echte PV-Sensoren tragen device_class power —
+    # genau deshalb ist "solar" für sie unerreichbar (Befund 13646)
+
     Entitaet("sensor.batterie_ladestand", "keller", "sensor", "battery"),
-    Entitaet("sensor.netz_bezug", "hauswirtschaft", "sensor", "grid"),
+    Entitaet("sensor.netz_bezug", "hauswirtschaft", "sensor", "power"),  # dito: "grid" unerreichbar,
+    # Einspeisung (negativ) wird zu power/low (Befund 13646)
+
     Entitaet("sensor.wohnzimmer_co2", "wohnzimmer", "sensor", "carbon_dioxide", "co2"),
     Entitaet("switch.wallbox", "garage", "switch", None, "wallbox"),
     Entitaet("sensor.keller_server_cpu", "keller", "sensor", None, "cpu"),

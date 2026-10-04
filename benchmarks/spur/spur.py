@@ -177,7 +177,9 @@ class Kopf:
     zeitzone: str
     konverter: str
     entitaeten: Sequence[Entitaet]
+    #: Pflicht bei fremden Quellen (Abnahme 13642): Lizenz UND Zitat.
     lizenz: Optional[str] = None
+    zitat: Optional[str] = None
     zeitraum: Optional[Tuple[str, str]] = None
 
     def als_json(self) -> dict:
@@ -189,6 +191,7 @@ class Kopf:
             "zeitzone": self.zeitzone,
             "konverter": self.konverter,
             "lizenz": self.lizenz if self.lizenz is not None else "",
+            "zitat": self.zitat if self.zitat is not None else "",
             "entitaeten": [e.als_json() for e in self.entitaeten],
             "kategorien_stand": KATEGORIEN_STAND,
         }
@@ -354,6 +357,16 @@ def _kopf_aus_json(daten: dict) -> Kopf:
     if daten.get("quelle") not in QUELLEN:
         raise SpurFehler(f"quelle unbekannt: {daten.get('quelle')!r} "
                          f"(erlaubt: {QUELLEN})")
+    if daten.get("quelle") != "simulation":
+        # Abnahme 13642: Bei fremden Quellen sind Lizenz UND Zitat Pflicht
+        # — eine Spur ohne Herkunft ist keine Messung, sondern ein Fund.
+        for pflicht in ("lizenz", "zitat"):
+            if not (daten.get(pflicht) or "").strip():
+                raise SpurFehler(
+                    f"quelle={daten.get('quelle')!r}, aber '{pflicht}' fehlt "
+                    "— Lizenz und Zitat sind Pflicht bei fremden Quellen "
+                    "(Abnahme 13642)."
+                )
     entitaeten = []
     for roh in daten.get("entitaeten") or []:
         if not roh.get("id") or not roh.get("raum") or not roh.get("domain"):
@@ -385,6 +398,7 @@ def _kopf_aus_json(daten: dict) -> Kopf:
         konverter=daten["konverter"],
         entitaeten=entitaeten,
         lizenz=daten.get("lizenz"),
+        zitat=daten.get("zitat"),
         zeitraum=(zeitraum[0], zeitraum[1]) if zeitraum else None,
     )
 
@@ -483,6 +497,43 @@ def uebersicht(spur: Spur) -> dict:
     for e in spur.ereignisse:
         if e.marke:
             marken[e.marke] = marken.get(e.marke, 0) + 1
+
+    # Diagnose (13646, 1): Semantik laut Name vs. vergebene Semantik.
+    # Die Engine entscheidet nach device_class/Einheit ZUERST; ein
+    # power-Sensor namens "..._pv_leistung" wird deshalb "power", nie
+    # "solar". Diese Zeile zaehlt, wie oft der Name etwas anderes sagt.
+    vergeben_engine = registriere(spur.kopf.entitaeten)
+    namen_engine = Thalamus()
+    semantik_abweichungen: Dict[str, int] = {}
+    semantik_paare = set()
+    uebersteuerungen = 0
+    for e in spur.kopf.entitaeten:
+        if e.semantik:
+            uebersteuerungen += 1
+        namen_engine.register_entity(e.id, ha_area=e.raum, domain=e.domain)
+        vergeben = vergeben_engine.entity_semantic.get(e.id)
+        laut_name = namen_engine.entity_semantic.get(e.id)
+        if vergeben and laut_name and vergeben != laut_name:
+            kat = kategorie(haus_typ, vergeben)
+            semantik_abweichungen[kat] = semantik_abweichungen.get(kat, 0) + 1
+            semantik_paare.add(f"{vergeben} statt {laut_name}")
+
+    # Diagnose (13646, 2): Entitaeten je Token — Token-Kollision je Raum.
+    token_entitaeten: Dict[str, set] = {}
+    for token, e in zip(tokens, spur.ereignisse):
+        token_entitaeten.setdefault(token, set()).add(e.entity)
+    tokens_je_kat: Dict[str, int] = {}
+    kollisionen_je_kat: Dict[str, int] = {}
+    for token, entitaeten in token_entitaeten.items():
+        kat = kategorie(haus_typ, token_zerlegen(token)[1])
+        tokens_je_kat[kat] = tokens_je_kat.get(kat, 0) + 1
+        if len(entitaeten) > 1:
+            kollisionen_je_kat[kat] = kollisionen_je_kat.get(kat, 0) + 1
+    entitaeten_je_token = {
+        kat: round(kollisionen_je_kat.get(kat, 0) / n, 4)
+        for kat, n in sorted(tokens_je_kat.items())
+    }
+
     return {
         "haus": spur.kopf.haus,
         "haus_typ": haus_typ,
@@ -495,6 +546,10 @@ def uebersicht(spur: Spur) -> dict:
         "hypothalamus_luecken": dict(sorted(luecken_je_kategorie.items())),
         "hypothalamus_luecken_paare": sorted(luecken_paare),
         "marken": dict(sorted(marken.items())),
+        "semantik_abweichungen": dict(sorted(semantik_abweichungen.items())),
+        "semantik_abweichungen_paare": sorted(semantik_paare),
+        "semantik_uebersteuerungen": uebersteuerungen,
+        "entitaeten_je_token": dict(entitaeten_je_token),
     }
 
 

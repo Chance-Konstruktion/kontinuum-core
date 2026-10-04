@@ -139,6 +139,30 @@ def test_unbekannte_entity_ist_ein_fehler():
                          "nicht in")
 
 
+def test_zitat_und_lizenz_sind_pflicht_bei_fremden_quellen():
+    """Abnahme 13642: quelle != simulation verlangt lizenz UND zitat —
+    eine Spur ohne Herkunft ist keine Messung."""
+    with tempfile.TemporaryDirectory() as ordner:
+        kopf = json.loads(_kopf_zeile())
+        kopf["quelle"] = "casas"
+        kopf["lizenz"] = "CC BY 4.0"
+        pfad = _schreibe_zeilen(
+            Path(ordner),
+            [json.dumps(kopf), json.dumps(
+                {"ts": "2026-03-02T07:00:00+02:00",
+                 "entity": "light.wohnzimmer", "zustand": "on"})],
+        )
+        _erwartet_fehler("Zitat fehlt", lambda: lies_spur(pfad), "zitat")
+        kopf["zitat"] = "Cook et al. (2013), CASAS"
+        _schreibe_zeilen(
+            Path(ordner),
+            [json.dumps(kopf), json.dumps(
+                {"ts": "2026-03-02T07:00:00+02:00",
+                 "entity": "light.wohnzimmer", "zustand": "on"})],
+        )
+        assert lies_spur(pfad).kopf.zitat == "Cook et al. (2013), CASAS"
+
+
 # ---------------------------------------------------------------------------
 # Ausduennung — und der Beweis, dass sie verlustfrei ist
 # ---------------------------------------------------------------------------
@@ -235,6 +259,38 @@ def test_leck_tag_verschwindet_in_den_eimern():
     assert mit.leck_roh >= 40
     assert 0 < mit.leck_spur <= 3
     assert mit.bericht["eimer_verlust"] > 0
+
+
+def test_diagnose_semantik_laut_name_gegen_vergeben():
+    """Befund 13646: Ein Leistungssensor mit device_class power wird
+    "power", nie "solar"/"grid" — der Name sagt etwas anderes. Die
+    Diagnosezeile zaehlt genau diese Faelle (die Simulation traegt sie
+    jetzt realistisch: pv_leistung und netz_bezug haben device_class
+    power, wie echte HA-Sensoren)."""
+    simulation = simuliere("geraete", tage=10, saat=4)
+    bericht = uebersicht(simulation.spur)
+    # Der Netz-Sensor (device_class power, Name ..._netz_bezug): die
+    # Klasse gewinnt, "grid" ist unerreichbar — genau der Fund 13646.
+    assert "power statt grid" in bericht["semantik_abweichungen_paare"]
+    # Ausdrueckliche Uebersteuerungen (wallbox, co2, cpu) stehen als
+    # eigene Zahl daneben — Absicht, kein Fund.
+    assert "wallbox statt switch" in bericht["semantik_abweichungen_paare"]
+    assert bericht["semantik_uebersteuerungen"] == 3
+    assert bericht["semantik_abweichungen"].get("energie", 0) >= 2
+    # Und der Gegentest der Diagnose: pv_leistung zeigt KEINE Abweichung,
+    # weil das Stichwort "leistung" in SENSOR_KEYWORDS VOR "pv_" steht —
+    # beide Wege sagen "power". Zwei Mechanismen, eine Zeile, die beide
+    # sichtbar macht (Klassen-Vorrang UND Stichwort-Reihenfolge).
+
+
+def test_diagnose_entitaeten_je_token():
+    """Befund 13646: raum.semantik.zustand vermischt Entities desselben
+    Raums und derselben Semantik. Im Geraete-Haus liegen drei
+    Leistungsmesser in hauswirtschaft — die Diagnose muss das zeigen."""
+    geraete = uebersicht(simuliere("geraete", tage=10, saat=4).spur)
+    assert geraete["entitaeten_je_token"].get("energie", 0) > 0
+    klassisch = uebersicht(simuliere("klassisch", tage=10, saat=4).spur)
+    assert klassisch["entitaeten_je_token"].get("bewegung", 0) == 0
 
 
 def test_uebersicht_traegt_die_aggregate():

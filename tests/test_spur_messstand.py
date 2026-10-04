@@ -15,7 +15,12 @@ mitziehen. Genau dafuer steht er hier.
 """
 from __future__ import annotations
 
-from benchmarks.spur.messstand import ENGINE_ROH, messe, messe_ursprung
+from benchmarks.spur.messstand import (
+    ENGINE_ROH,
+    gepaarte_differenz,
+    messe,
+    messe_ursprung,
+)
 from benchmarks.spur.simulator import simuliere
 
 SAAT_KLASSISCH = 1
@@ -66,8 +71,8 @@ def test_rollierende_ursprunge():
 def test_befund_rohliste_schlaegt_ranking():
     """BEFUND (03.10.2026, Simulation, Saat 1, Ursprung 4, geseedet
     deterministisch): Die rohe Hippocampus-Liste traegt die Wahrheit,
-    das Modul-Ranking schiebt sie aus Platz 1 — klassisch 63,4 % vs.
-    44,9 %, geraete 86,6 % vs. 69,9 %. Dieser Test haelt den Befund
+    das Modul-Ranking schiebt sie aus Platz 1 — klassisch 60,0 % vs.
+    43,9 %, geraete 83,7 % vs. 67,8 %. Dieser Test haelt den Befund
     fest; das Ranking gehoert auf den Pruefstand (Protokoll § 5),
     nicht wegdiskutiert."""
     for typ in ("klassisch", "geraete"):
@@ -78,13 +83,27 @@ def test_befund_rohliste_schlaegt_ranking():
         assert roh > gerankt, (typ, roh, gerankt)
 
 
+def test_gepaarte_differenz_wird_berichtet():
+    """Abnahme 13642, Punkt 3: je Haus die gepaarte Differenz
+    Engine − bester Gegner als Median [Min–Max] ueber die Ursprünge."""
+    sim = simuliere("klassisch", tage=56, saat=1)
+    ergebnis = messe(sim.spur, min_train_wochen=4)
+    differenz = gepaarte_differenz(ergebnis)
+    assert differenz["bester_gegner"] == "B2"
+    assert len(differenz["differenzen"]) == len(ergebnis.ursprunge)
+    assert differenz["min"] <= differenz["median"] <= differenz["max"]
+    # Befund: die Differenz ist NEGATIV (B2 fuehrt) — knapp ist sie nicht.
+    assert differenz["median"] < 0
+
+
 def test_befund_b2_ist_der_echte_gegner():
     """BEFUND: Auf dem klassischen Spielzeug-Haus schlaegt die reine
-    1-Gramm-Kette (B2) die Engine (50,7 % vs. 44,9 %, Saat 1,
+    1-Gramm-Kette (B2) die Engine (50,7 % vs. 43,9 %, Saat 1,
     Ursprung 4, geseedet). Die Engine schlaegt B1 deutlich — aber der
     Sieg ueber B2 ist NICHT geschenkt; genau das soll die Tafel zeigen.
     (Auf dem Geraete-Haus gewinnt die Engine diese eine Testwoche mit
-    69,9 % vs. 63,2 % — ueber alle Ursprünge ist es ein Patt; die
+    67,8 % vs. 59,8 % — ueber alle vier Ursprünge ist die gepaarte
+    Differenz nur +7,1 % [−1,6..+12,1]: ein Ursprung verliert. Die
     Spanne entscheidet, nicht die Einzelwoche.)"""
     sim = simuliere("klassisch", tage=42, saat=1)
     ergebnis = messe_ursprung(sim.spur, train_wochen=4)
