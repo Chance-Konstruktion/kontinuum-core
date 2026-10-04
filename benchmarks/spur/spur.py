@@ -315,30 +315,40 @@ def tokenisieren(spur: Spur) -> List[str]:
 # ---------------------------------------------------------------------------
 
 
+def duenne_aus_strom(
+    entitaeten: Sequence[Entitaet],
+    roh: Iterable[Ereignis],
+) -> Iterator[Ereignis]:
+    """Wie ``ausduennen``, aber STREAMEND: gibt die behaltenen Ereignisse
+    einzeln heraus, statt eine Riesenliste zu bauen (CASAS aruba hat
+    1,6 Mio. Ereignisse — als Liste kostet das hunderte MB).
+
+    Entfernt genau die Ereignisse, die die Engine selbst verwerfen
+    wuerde (unavailable/unknown, gleiches Token in Folge je Entity) —
+    mit dem ECHTEN Thalamus, nicht mit einem Nachbau. Ein Ereignis
+    einer unbekannten Entity ist ein Fehler MIT NAMEN und fliegt
+    sofort (wer in eine Temp-Datei schreibt, hinterlaesst dann keine
+    halbe Spur)."""
+    thalamus = registriere(entitaeten)
+    for e in roh:
+        signal = thalamus.process(e.entity, e.zustand, e.alt, e.ts)
+        if signal is not None:
+            yield e
+        elif e.entity not in thalamus.entity_semantic:
+            raise SpurFehler(
+                "Ereignis von nicht registrierter Entity: "
+                f"{e.entity!r} ({e.ts.isoformat()}) — die "
+                "Entitaetentabelle ist unvollstaendig."
+            )
+
+
 def ausduennen(
     entitaeten: Sequence[Entitaet],
     roh: Iterable[Ereignis],
 ) -> List[Ereignis]:
-    """Entfernt genau die Ereignisse, die die Engine selbst verwerfen
-    wuerde (unavailable/unknown, gleiches Token in Folge je Entity) —
-    mit dem ECHTEN Thalamus, nicht mit einem Nachbau. Ein Ereignis
-    einer unbekannten Entity ist dagegen ein Fehler."""
-    thalamus = registriere(entitaeten)
-    fehlend = set()
-    behalten: List[Ereignis] = []
-    for e in roh:
-        signal = thalamus.process(e.entity, e.zustand, e.alt, e.ts)
-        if signal is not None:
-            behalten.append(e)
-            continue
-        if e.entity not in thalamus.entity_semantic:
-            fehlend.add(e.entity)
-    if fehlend:
-        raise SpurFehler(
-            "Ereignisse von nicht registrierten Entities: "
-            f"{sorted(fehlend)} — die Entitaetentabelle ist unvollstaendig."
-        )
-    return behalten
+    """Liste der behaltenen Ereignisse — die Bequemlichkeit fuer kleine
+    Spuren; grosse Spuren nehmen ``duenne_aus_strom``."""
+    return list(duenne_aus_strom(entitaeten, roh))
 
 
 # ---------------------------------------------------------------------------
@@ -458,12 +468,32 @@ def lies_spur(pfad) -> Spur:
 def schreibe_spur(spur: Spur, pfad) -> None:
     """Schreibt die Spur als JSONL (UTF-8, LF). Der Kopf traegt die
     Entitaetentabelle; `marke` reist nur mit, wenn sie gesetzt ist."""
+    schreibe_spur_strom(spur.kopf, spur.ereignisse, pfad)
+
+
+def schreibe_spur_strom(kopf: Kopf, ereignisse: Iterable[Ereignis], pfad,
+                        zeit_lauf: Optional[Tuple[str, str]] = None) -> int:
+    """Schreibt eine Spur, ohne alle Ereignisse im Speicher zu halten;
+    gibt die Zahl der geschriebenen Ereignisse zurueck.
+
+    Erst in eine Temp-Datei, dann umbenennen: Ein Fehler mitten im Strom
+    darf keine halbe Spur hinterlassen, die wie eine ganze aussieht.
+    ``zeit_lauf`` setzt den Zeitraum im Kopf, wenn er nicht erst aus den
+    Ereignissen selbst bekannt ist (der Konverter kennt ihn vorher)."""
     ziel = Path(pfad)
     ziel.parent.mkdir(parents=True, exist_ok=True)
-    zeilen = [json.dumps(spur.kopf.als_json(), ensure_ascii=False)]
-    for e in spur.ereignisse:
-        zeilen.append(json.dumps(e.als_json(), ensure_ascii=False))
-    ziel.write_text("\n".join(zeilen) + "\n", encoding="utf-8", newline="\n")
+    temp = ziel.with_suffix(ziel.suffix + ".teil")
+    kopf_json = kopf.als_json()
+    if zeit_lauf is not None:
+        kopf_json["zeitraum"] = list(zeit_lauf)
+    anzahl = 0
+    with temp.open("w", encoding="utf-8", newline="\n") as datei:
+        datei.write(json.dumps(kopf_json, ensure_ascii=False) + "\n")
+        for e in ereignisse:
+            datei.write(json.dumps(e.als_json(), ensure_ascii=False) + "\n")
+            anzahl += 1
+    temp.replace(ziel)
+    return anzahl
 
 
 # ---------------------------------------------------------------------------
@@ -573,5 +603,6 @@ __all__ = [
     "ausduennen",
     "lies_spur",
     "schreibe_spur",
+    "schreibe_spur_strom",
     "uebersicht",
 ]

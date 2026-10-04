@@ -20,6 +20,7 @@ stages:
   - test
   - validate
   - release
+  - messstand
 
 variables:
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
@@ -158,3 +159,54 @@ release:
     description: "Automatisch erzeugt aus Tag $CI_COMMIT_TAG."
   rules:
     - if: $CI_COMMIT_TAG
+
+# ── Messstand: CASAS (Stufe 1, Schritt 4) ─────────────────────────────
+# Der Messstand misst auf oeffentlichen Spuren. Diesen Job interessiert
+# NUR der Beweis des Konverters: Archiv laden, Pruefsumme pruefen,
+# CASAS-Haeuser in Kontinuum-Spuren wandeln, Waechter laufen lassen.
+# Die Rohdaten und die Spuren bleiben in /tmp — ins Artefakt kommen
+# ausschliesslich Aggregate (Datenregel; das Repo ist oeffentlich).
+spur-casas:
+  stage: messstand
+  image: python:3.13
+  timeout: 60 minutes
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends curl unzip
+    # tzdata: ohne die Zeitzonen-Datenbank faellt der Konverter auf eine
+    # feste Zone zurueck und sagt das im Bericht — hier soll er die
+    # echte Zone haben (America/Los_Angeles).
+    - pip install -q tzdata
+  script:
+    # 1. DIE QUELLE — Pruefsumme gegen den Zenodo-Record 17180309.
+    - curl -sS --retry 3 -L -o /tmp/casas.zip "https://zenodo.org/api/records/17180309/files/new_labeled_data.zip/content"
+    - echo "86954063e1d2099d288f59227b19a749  /tmp/casas.zip" | md5sum -c -
+    # 2. DIE SPUREN — Rohdaten und Spuren NUR in /tmp.
+    - mkdir -p /tmp/spuren build/kennzahlen
+    - |
+      python - <<'PY'
+      import json
+      from benchmarks.spur.casas import HAEUSER, konvertiere
+      berichte = []
+      for haus in HAEUSER:
+          bericht = konvertiere("/tmp/casas.zip", haus,
+                                f"/tmp/spuren/casas-{haus}.jsonl")
+          berichte.append(bericht)
+          print(bericht["haus"], "->", bericht["behalten"], "Ereignisse,",
+                bericht["tage"], "Tage, Zeitzone", bericht["zeitzone"])
+      with open("build/kennzahlen/casas-konverter.json", "w",
+                encoding="utf-8") as f:
+          json.dump(berichte, f, ensure_ascii=False, indent=1)
+      PY
+    # 3. DER WAECHTER — nur Aggregate, je Haus; ins Artefakt.
+    - python -m benchmarks.spur.pruefe_spur --ordner /tmp/spuren --json > build/kennzahlen/casas-tafel.json
+    - cat build/kennzahlen/casas-tafel.json
+  artifacts:
+    when: always
+    paths:
+      - build/kennzahlen/
+    expire_in: 30 days
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "web"

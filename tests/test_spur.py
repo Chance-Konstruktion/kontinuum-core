@@ -208,7 +208,7 @@ def test_unbekannte_entity_im_strom_ist_kein_stilles_wegduennen():
     _erwartet_fehler(
         "Unregistrierte Entity im Strom",
         lambda: ausduennen(entitaeten, roh),
-        "nicht registrierten",
+        "nicht registrierter",
     )
 
 
