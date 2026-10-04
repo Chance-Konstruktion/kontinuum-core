@@ -4,17 +4,26 @@ from __future__ import annotations
 
 import time
 from collections import deque
+from typing import Callable, Optional
 
 
 class LocusCoeruleus:
     WINDOW_SECONDS = 60
 
-    def __init__(self):
+    def __init__(self, clock: Optional[Callable[[], float]] = None):
+        # Die Uhr (Abnahme 13642): Standard Wanduhr; wer Ereigniszeit
+        # hat, reicht sie JE AUFRUF herein (der Engine-Weg). Eine
+        # konfigurierte Uhr ist der Rueckfall, wenn kein Ereignis-Zeit-
+        # stempel vorliegt — so bleibt der Live-Betrieb unveraendert.
+        self._clock = clock or time.time
         self.events = deque(maxlen=2000)
         self.arousal = 0.2
 
-    def observe_event(self):
-        now = time.time()
+    def observe_event(self, now: Optional[float] = None) -> None:
+        """Ein Ereignis zaehlen. ``now`` = Ereigniszeit (Epoch-Sekunden);
+        ohne Angabe gilt die Uhr (Standard: Wanduhr)."""
+        if now is None:
+            now = self._clock()
         self.events.append(now)
         self._recompute(now)
 

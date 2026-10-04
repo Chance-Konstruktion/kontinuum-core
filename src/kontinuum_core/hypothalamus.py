@@ -66,9 +66,12 @@ class HomeoState:
             max(0.0, min(1.0, (self.trend_solar + 1) / 2)),
         ]
 
-    def update_trend(self, semantic: str, level: int):
-        """Computes trend coefficients from level deltas."""
-        now = time.time()
+    def update_trend(self, semantic: str, level: int, now: float):
+        """Computes trend coefficients from level deltas.
+
+        ``now`` ist die EREIGNISZEIT (Abnahme 13642): Vorher las diese
+        Stelle die Wanduhr, und im Replay liefen Trends und Cooldowns
+        dadurch in echter Zeit statt in Hauszeit."""
         if semantic == "temperature":
             if self._prev_temp is not None and (now - self._prev_temp_time) > 60:
                 hours = (now - self._prev_temp_time) / 3600
@@ -95,7 +98,11 @@ class Hypothalamus:
     ENERGY_COOLDOWN = 60
     CLIMATE_COOLDOWN = 1800
 
-    def __init__(self):
+    def __init__(self, clock=None):
+        # Die Uhr (Abnahme 13642): Standard Wanduhr; die Engine reicht
+        # JE AUFRUF die Ereigniszeit herein. Ohne Ereignis-Zeitstempel
+        # gilt diese Uhr — Live-Betrieb bleibt damit unveraendert.
+        self._clock = clock or time.time
         self.state = HomeoState()
         self.events_absorbed = 0
         self.last_energy_state = None
@@ -107,16 +114,19 @@ class Hypothalamus:
         return semantic in ENERGY_SEMANTICS or semantic in CLIMATE_SEMANTICS
 
     def absorb(self, room: str, semantic: str, state: str,
-               entity_id: str = "") -> dict:
+               entity_id: str = "", now: float = None) -> dict:
         """Absorbs an energy/climate event and updates state.
 
         Returns a transition token dict on significant change, else None.
-        """
+        ``now`` ist die Ereigniszeit (Epoch-Sekunden); ohne Angabe gilt
+        die Uhr (Standard: Wanduhr, Abnahme 13642)."""
+        if now is None:
+            now = self._clock()
         self.events_absorbed += 1
         level = STATE_TO_LEVEL.get(state, 1)
 
         if semantic in ("temperature", "battery", "solar"):
-            self.state.update_trend(semantic, level)
+            self.state.update_trend(semantic, level, now)
 
         if semantic == "battery":
             self.state.battery_state = level
@@ -146,12 +156,12 @@ class Hypothalamus:
             self.state.heating_active = state in ("heating", "heat")
 
         if semantic in ENERGY_SEMANTICS:
-            return self._check_energy_transition()
+            return self._check_energy_transition(now)
         if semantic in CLIMATE_SEMANTICS:
-            return self._check_climate_transition()
+            return self._check_climate_transition(now)
         return None
 
-    def _check_energy_transition(self) -> dict:
+    def _check_energy_transition(self, now: float) -> dict:
         battery = self.state.battery_state
         solar = self.state.solar_state
         current = (battery, solar)
@@ -159,7 +169,6 @@ class Hypothalamus:
         if current == self.last_energy_state:
             return None
 
-        now = time.time()
         if (now - self._last_energy_event_time) < self.ENERGY_COOLDOWN:
             self.last_energy_state = current
             return None
@@ -184,13 +193,12 @@ class Hypothalamus:
             "state": energy_state,
         }
 
-    def _check_climate_transition(self) -> dict:
+    def _check_climate_transition(self, now: float) -> dict:
         current = self.state.indoor_temp
 
         if current == self.last_climate_state:
             return None
 
-        now = time.time()
         if (now - self._last_climate_event_time) < self.CLIMATE_COOLDOWN:
             self.last_climate_state = current
             return None

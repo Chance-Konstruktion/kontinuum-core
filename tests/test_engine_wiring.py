@@ -29,6 +29,13 @@ def _drive_pattern(e: KontinuumEngine, cycles: int):
     """Feed a repeating switch.on -> light.on -> switch.off -> light.off loop.
 
     Returns the list of snapshots produced (one per processed event).
+
+    Der Takt ist 5 SEKUNDEN je Ereignis (Abnahme 13642): Vorher lief
+    derselbe Muster-Strom im Minuten-Takt, und die Arousal-Zusage unten
+    ging nur auf, weil der Locus Coeruleus die WANDUHR las und alle
+    Ereignisse dadurch „gerade eben“ waren. Seit die Ereigniszeit gilt,
+    braucht ein dichter Strom auch dichte Zeitstempel — sonst ist er
+    ehrlich ruhig (12 Ereignisse je Minute sind dicht, eins nicht).
     """
     base = datetime(2026, 6, 13, 19, 0, 0, tzinfo=timezone.utc)
     steps = [
@@ -41,7 +48,7 @@ def _drive_pattern(e: KontinuumEngine, cycles: int):
     n = 0
     for c in range(cycles):
         for entity_id, state in steps:
-            ts = base + timedelta(minutes=n)
+            ts = base + timedelta(seconds=5 * n)
             snaps.append(e.observe({
                 "entity_id": entity_id,
                 "new_state": state,
@@ -168,9 +175,14 @@ def test_feedback_reinforces_reward_modules():
         "decision" in s.extra for s in snaps
     )
     # Drive one more switch.on so a fresh decision is remembered.
+    # Der Zeitstempel bleibt in derselben STUNDE wie das Muster
+    # (Abnahme 13642): Der Kontext-Bucket traegt die Stunde, und ein
+    # Sprung auf 07:00 macht aus dem Ereignis ehrlich Neuland — es gibt
+    # dann keine Vorhersage und keine Entscheidung. Geprueft wird hier
+    # der feedback()-Weg, nicht die Stunden-Generalisation.
     e.observe({
         "entity_id": "switch.kitchen", "new_state": "on",
-        "timestamp": datetime(2026, 6, 14, 7, 0, 0, tzinfo=timezone.utc),
+        "timestamp": datetime(2026, 6, 13, 19, 20, 0, tzinfo=timezone.utc),
     })
     assert e._last_decision_ctx is not None, "no decision remembered to reinforce"
 
