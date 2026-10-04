@@ -5,6 +5,7 @@ Ereignisses gegen die dummen Gegner B0/B1/B2. Dieses Paket traegt den
 ersten Bauschritt — Format, Waechter und Simulator; der Messkern
 (Gegner, Kennzahlen, Tafel) folgt als eigener Schritt.
 """
+from .gegner import B0, B1, B2, Zaehler, gegner
 from .spur import (
     HAUS_TYPEN,
     KATEGORIEN,
@@ -29,6 +30,11 @@ from .spur import (
 )
 
 __all__ = [
+    "B0",
+    "B1",
+    "B2",
+    "Zaehler",
+    "gegner",
     "SPUR_FORMAT",
     "KATEGORIEN_STAND",
     "KATEGORIEN",
