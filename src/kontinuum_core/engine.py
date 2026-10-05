@@ -7,7 +7,9 @@ host integration (ha-kontinuum, ha-kontinuum-lite).
 Per-event pipeline (the modules that influence the decision):
     thalamus.process()        → token_id + normalized state
     locus_coeruleus           → arousal (event density)
-    hypothalamus.absorb()     → homeostasis side-channel
+    hypothalamus.absorb()     → homeostasis side-channel; significant
+                                changes (house.energy.*/house.climate.*)
+                                are LEARNED like sensor tokens (#4)
     spatial_cortex/entorhinal → room map + next-room anticipation
     insula.process()          → mode detection
     context vector            → time(9) + hypothalamus(9) + insula(3) = 21
@@ -103,6 +105,11 @@ class KontinuumEngine:
             metaplasticity stays inert (still queryable, no scheduling).
         storage_path: Optional directory for persistent state of
             sub-modules that opt-in (currently Metaplasticity only).
+        learn_house_transitions: When True, the hypothalamus transition
+            tokens (house.energy.*/house.climate.*) are learned like sensor
+            tokens (issue #4). Default False: they are observed (they still
+            ride the snapshot as ``extra["house_transition"]``) but not
+            learned — the Stufe-1 ablation (#2) decides when to switch on.
     """
 
     def __init__(
@@ -110,6 +117,7 @@ class KontinuumEngine:
         config: Optional[Dict[str, Any]] = None,
         scheduler: Optional[Scheduler] = None,
         storage_path: Optional[str] = None,
+        learn_house_transitions: bool = False,
     ):
         """``config`` kann ``{"clock": aufrufbar}`` tragen (Abnahme 13642):
         eine explizite Uhr (Epoch-Sekunden, Standard ``time.time``). Sie
@@ -121,6 +129,12 @@ class KontinuumEngine:
         self.config = config or {}
         self._clock = self.config.get("clock") or time.time
         self.scheduler = scheduler
+        # FLUG 2608 / issue #4 — the energy connection ships BEHIND a switch:
+        # by default the hypothalamus transition tokens are observed (they
+        # ride the snapshot as extra["house_transition"]) but NOT learned,
+        # so main keeps the old behavior until the Stufe-1 ablation (#2)
+        # shows a stable win without collateral damage.
+        self.learn_house_transitions = learn_house_transitions
         self.thalamus = Thalamus()
         self.hippocampus = Hippocampus()
         self.predictive = PredictiveProcessing()
@@ -241,9 +255,20 @@ class KontinuumEngine:
         self.locus_coeruleus.observe_event(ev_now)
         self.sleep_consolidation.observe_event()
 
-        # Homeostasis absorption (energy/climate side-channel)
+        # Homeostasis absorption (energy/climate side-channel). absorb()
+        # returns a transition-token dict (house.energy.*/house.climate.*)
+        # on significant change — FLUG 2608 / issue #4: that token is
+        # LEARNED below instead of being discarded (the return value used
+        # to fall on the floor: the brain never saw the house's own state
+        # changes, only the sluggish 9-dim context vector).
+        house_transition = None
         if self.hypothalamus.is_hypothalamus_signal(semantic):
-            self.hypothalamus.absorb(room, semantic, state, entity_id, ev_now)
+            # Beide Aenderungen zusammen: der Uebergangs-Token wird
+            # GELERNT (Flug 2608 / #6) und der Hypothalamus rechnet in
+            # EREIGNISZEIT (Abnahme 13642 / !8).
+            house_transition = self.hypothalamus.absorb(
+                room, semantic, state, entity_id, ev_now
+            )
 
         # Spatial map + entorhinal room-transition anticipation. The spatial
         # cortex turns raw presence/motion/tracker signals into debounced
@@ -308,6 +333,25 @@ class KontinuumEngine:
 
         # Hippocampus learns (weighted by surprise + rhythms + clock + ACh).
         self.hippocampus.learn(token_id, ctx, timestamp, learn_weight=learn_weight)
+
+        # FLUG 2608 / issue #4 — DER ENERGIE-ANSCHLUSS: the house's own
+        # transitions join the SAME Markov memory as sensor tokens, so the
+        # brain can learn and predict the house's energy rhythm (solar
+        # surplus -> charge, battery low -> grid). Deliberately slim:
+        # intern + learn with THIS event's finalized learn weight — no
+        # separate ranking, no second predict pass. Whether the connection
+        # PAYS is the Stufe-1 ablation's question (Messstand #2: Token-
+        # Quelle an/aus, Top-1/Top-3 je Kategorie, >= 5 Saaten).
+        house_transition_token = None
+        if house_transition is not None:
+            house_transition_token = house_transition.get("token")
+            if house_transition_token and self.learn_house_transitions:
+                house_id = self.thalamus.get_or_create_token(
+                    house_transition_token
+                )
+                self.hippocampus.learn(
+                    house_id, ctx, timestamp, learn_weight=learn_weight
+                )
 
         # Slow hormones observe every event (ranking-side effects only):
         #   cortisol  – integrates sustained surprise/anomaly into stress,
@@ -418,6 +462,7 @@ class KontinuumEngine:
             extra=self._build_extra(
                 raw_predictions, fired_rule, decision, anomaly_threshold,
                 prev_event_ts, stn_brake, stn_hold, interval_injected, now_ts,
+                house_transition_token,
             ),
         )
 
@@ -690,9 +735,11 @@ class KontinuumEngine:
                      anomaly_threshold, prev_event_ts,
                      stn_brake: float = 0.0, stn_hold: bool = False,
                      interval_injected: Optional[int] = None,
-                     now_ts: Optional[float] = None) -> Dict[str, Any]:
+                     now_ts: Optional[float] = None,
+                     house_transition_token: Optional[str] = None) -> Dict[str, Any]:
         """Surface the rich module outputs that used to be discarded."""
         extra: Dict[str, Any] = {
+            "house_transition": house_transition_token,
             "anomaly_threshold": round(anomaly_threshold, 3),
             "arousal": round(self.locus_coeruleus.get_arousal(), 3),
             "cognitive_control": round(self.anterior_cingulate.cognitive_control, 3),
