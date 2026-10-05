@@ -101,12 +101,15 @@ def test_rollierende_ursprunge():
 
 
 def test_befund_rohliste_schlaegt_ranking():
-    """BEFUND (03.10.2026, Simulation, Saat 1, Ursprung 4, geseedet
-    deterministisch): Die rohe Hippocampus-Liste traegt die Wahrheit,
-    das Modul-Ranking schiebt sie aus Platz 1 — klassisch 60,0 % vs.
-    43,9 %, geraete 83,7 % vs. 67,8 %. Dieser Test haelt den Befund
-    fest; das Ranking gehoert auf den Pruefstand (Protokoll § 5),
-    nicht wegdiskutiert."""
+    """BEFUND (05.10.2026, Simulation, Saat 1, Ursprung 4, geseedet,
+    mit Zeitgeber/Ereigniszeit gemessen): Die rohe Liste traegt die
+    Wahrheit, das Modul-Ranking schiebt sie aus Platz 1 — klassisch
+    50,7 % vs. 45,9 %, geraete 67,4 % vs. 55,2 %. (Die frueheren
+    Wanduhr-Zahlen 60,0/43,9 und 83,7/67,8 ueberzeichneten den Abstand:
+    die Zahl hing an der Tageszeit des Laufs, siehe
+    tests/test_spur_zeitgeber.py.) Dieser Test haelt den Befund fest;
+    das Ranking gehoert auf den Pruefstand (Protokoll § 5), nicht
+    wegdiskutiert."""
     for typ in ("klassisch", "geraete"):
         sim = simuliere(typ, tage=42, saat=1)
         ergebnis = messe_ursprung(sim.spur, train_wochen=4)
@@ -124,19 +127,22 @@ def test_gepaarte_differenz_wird_berichtet():
     assert differenz["bester_gegner"] == "B2"
     assert len(differenz["differenzen"]) == len(ergebnis.ursprunge)
     assert differenz["min"] <= differenz["median"] <= differenz["max"]
-    # Befund: die Differenz ist NEGATIV (B2 fuehrt) — knapp ist sie nicht.
+    # Befund (mit Zeitgeber): die Differenz ist NEGATIV (B2 fuehrt) —
+    # klassisch −10,2 % [−14,6 .. −4,9], Saat 1, 8 Wochen. Knapp ist
+    # sie nicht.
     assert differenz["median"] < 0
 
 
 def test_befund_b2_ist_der_echte_gegner():
-    """BEFUND: Auf dem klassischen Spielzeug-Haus schlaegt die reine
-    1-Gramm-Kette (B2) die Engine (50,7 % vs. 43,9 %, Saat 1,
-    Ursprung 4, geseedet). Die Engine schlaegt B1 deutlich — aber der
-    Sieg ueber B2 ist NICHT geschenkt; genau das soll die Tafel zeigen.
-    (Auf dem Geraete-Haus gewinnt die Engine diese eine Testwoche mit
-    67,8 % vs. 59,8 % — ueber alle vier Ursprünge ist die gepaarte
-    Differenz nur +7,1 % [−1,6..+12,1]: ein Ursprung verliert. Die
-    Spanne entscheidet, nicht die Einzelwoche.)"""
+    """BEFUND (05.10.2026, mit Zeitgeber/Ereigniszeit): Auf dem
+    klassischen Spielzeug-Haus schlaegt die reine 1-Gramm-Kette (B2)
+    die Engine (50,7 % vs. 45,9 %, Saat 1, Ursprung 4, geseedet); auch
+    auf dem Geraete-Haus liegt B2 vorn (59,8 % vs. 55,2 %), und ueber
+    die vier Ursprünge der 8-Wochen-Messung ist die gepaarte Differenz
+    −4,4 % [−7,4 .. −1,7]. Die Engine schlaegt B1 deutlich — aber der
+    Sieg ueber B2 ist an keiner Stelle geschenkt; genau das soll die
+    Tafel zeigen. (Der fruehere Geraete-„Sieg" +7,1 % war ein
+    Wanduhr-Artefakt.)"""
     sim = simuliere("klassisch", tage=42, saat=1)
     ergebnis = messe_ursprung(sim.spur, train_wochen=4)
     assert ergebnis.systeme["Engine"].trefferquote() > \
