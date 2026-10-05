@@ -119,7 +119,15 @@ class KontinuumEngine:
         storage_path: Optional[str] = None,
         learn_house_transitions: bool = False,
     ):
+        """``config`` kann ``{"clock": aufrufbar}`` tragen (Abnahme 13642):
+        eine explizite Uhr (Epoch-Sekunden, Standard ``time.time``). Sie
+        ist der RUECKFALL fuer Ereignisse ohne Zeitstempel und wird an
+        die zeitabhaengigen Module durchgereicht; hat ein Ereignis eine
+        Zeit, gilt IMMER die Ereigniszeit — im Haus aendert sich dadurch
+        nichts, im Replay/Backtest läuft die Engine in Hauszeit statt in
+        Abspielzeit."""
         self.config = config or {}
+        self._clock = self.config.get("clock") or time.time
         self.scheduler = scheduler
         # FLUG 2608 / issue #4 — the energy connection ships BEHIND a switch:
         # by default the hypothalamus transition tokens are observed (they
@@ -136,12 +144,12 @@ class KontinuumEngine:
         self.sleep_consolidation = SleepConsolidation()
         self.amygdala = Amygdala()
         self.insula = Insula()
-        self.hypothalamus = Hypothalamus()
+        self.hypothalamus = Hypothalamus(clock=self._clock)
         self.spatial_cortex = SpatialCortex()
         self.prefrontal_cortex = PrefrontalCortex(self.amygdala)
         self.anterior_cingulate = AnteriorCingulate()
         self.entorhinal_cortex = EntorhinalCortex()
-        self.locus_coeruleus = LocusCoeruleus()
+        self.locus_coeruleus = LocusCoeruleus(clock=self._clock)
         self.nucleus_accumbens = NucleusAccumbens()
         self.reticular = Reticular()
         # Reticular filtering is arousal-modulated by the Locus Coeruleus.
@@ -216,7 +224,9 @@ class KontinuumEngine:
         if not entity_id or new_state is None:
             return self._snapshot(extra={"skipped": "no_entity_or_state"})
 
-        timestamp = event.get("timestamp") or datetime.now(timezone.utc)
+        timestamp = event.get("timestamp") or datetime.fromtimestamp(
+            self._clock(), tz=timezone.utc
+        )
         old_state = event.get("old_state")
 
         signal = self.thalamus.process(entity_id, new_state, old_state, timestamp)
@@ -240,7 +250,9 @@ class KontinuumEngine:
 
         # Arousal + idle tracking (Locus Coeruleus feeds the Reticular gate;
         # Sleep counts events for the host-triggered consolidation cycle).
-        self.locus_coeruleus.observe_event()
+        # Beide bekommen die EREIGNISZEIT (Abnahme 13642) — vorher las der
+        # Locus Coeruleus die Wanduhr, und im Replay saettigte das Arousal.
+        self.locus_coeruleus.observe_event(ev_now)
         self.sleep_consolidation.observe_event()
 
         # Homeostasis absorption (energy/climate side-channel). absorb()
@@ -251,8 +263,11 @@ class KontinuumEngine:
         # changes, only the sluggish 9-dim context vector).
         house_transition = None
         if self.hypothalamus.is_hypothalamus_signal(semantic):
+            # Beide Aenderungen zusammen: der Uebergangs-Token wird
+            # GELERNT (Flug 2608 / #6) und der Hypothalamus rechnet in
+            # EREIGNISZEIT (Abnahme 13642 / !8).
             house_transition = self.hypothalamus.absorb(
-                room, semantic, state, entity_id
+                room, semantic, state, entity_id, ev_now
             )
 
         # Spatial map + entorhinal room-transition anticipation. The spatial
@@ -434,7 +449,7 @@ class KontinuumEngine:
         # testbar sind. Fällt ein Event ohne Timestamp rein, einmalig konsistent
         # auf die Wall-Clock zurückfallen.
         prev_event_ts = self._last_event_ts
-        now_ts = ev_now if ev_now is not None else datetime.now(timezone.utc).timestamp()
+        now_ts = ev_now if ev_now is not None else self._clock()
         self._maybe_maintain(timestamp, prev_event_ts, now_ts)
         self._last_event_ts = now_ts
 
