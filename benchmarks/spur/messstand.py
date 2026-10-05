@@ -266,6 +266,14 @@ def messe_ursprung(spur: Spur, train_wochen: int,
     letzte_engine: List[Tuple[str, float]] = []
     letzte_roh: List[Tuple[str, float]] = []
     for i, ereignis in enumerate(spur.ereignisse):
+        if ereignis.ts >= test_ende:
+            # Nach dem Testfenster aendert kein Ereignis mehr eine Zahl:
+            # die Vorhersagen fuer die Testwoche stehen fest, danach wird
+            # nichts mehr bewertet. Der Leser erzwingt nicht-absteigende
+            # Zeit (spur.py), also ist der Abbruch exakt. Ohne ihn liefe
+            # jeder Ursprung ueber die GANZE Spur — bei CASAS (1,6 Mio
+            # Ereignisse) der Unterschied zwischen Minuten und Stunden.
+            break
         # 1) Bewerten (nur Testwoche): die Vorhersage fuer token_i
         #    entstand aus dem Zustand nach Ereignis i-1 — auch am
         #    Rand: die letzte Trainingsvorhersage zielt auf das erste

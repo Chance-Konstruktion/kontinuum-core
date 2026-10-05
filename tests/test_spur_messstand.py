@@ -15,6 +15,8 @@ mitziehen. Genau dafuer steht er hier.
 """
 from __future__ import annotations
 
+from datetime import timedelta
+
 from benchmarks.spur.messstand import (
     ENGINE_ROH,
     gepaarte_differenz,
@@ -22,9 +24,39 @@ from benchmarks.spur.messstand import (
     messe_ursprung,
 )
 from benchmarks.spur.simulator import simuliere
+from kontinuum_core import KontinuumEngine
 
 SAAT_KLASSISCH = 1
 SAAT_GERAETE = 1
+
+
+def test_messstand_liest_nicht_hinter_dem_testende():
+    """Ein Ursprung endet mit seiner Testwoche — kein Ereignis danach
+    darf die Engine noch erreichen. Auf den Spielzeug-Haeusern faellt
+    das nicht auf, auf CASAS (1,6 Mio Ereignisse) kostet es Stunden.
+    Der Beweis laeuft ueber eine aufzeichnende Engine: ihr groesstes
+    gesehenes Datum liegt VOR dem Testende."""
+    sim = simuliere("klassisch", tage=42, saat=5)
+    spur = sim.spur
+    test_ende = spur.ereignisse[0].ts + timedelta(days=7 * 4 + 7)
+    gesehen = []
+
+    def bauer():
+        engine = KontinuumEngine()
+        original = engine.observe
+
+        def merken(ereignis):
+            gesehen.append(ereignis["timestamp"])
+            return original(ereignis)
+
+        engine.observe = merken  # type: ignore[method-assign]
+        return engine
+
+    messe_ursprung(spur, train_wochen=4, engine_bauer=bauer)
+    assert gesehen, "die Engine hat kein einziges Ereignis gesehen"
+    assert max(gesehen) < test_ende, (
+        f"hinter dem Testende gelesen: {max(gesehen)} >= {test_ende}"
+    )
 
 
 def test_messstand_bewertet_nur_die_testwoche():
