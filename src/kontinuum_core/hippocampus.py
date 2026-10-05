@@ -229,12 +229,19 @@ class Hippocampus:
         self.buffer.append(token_id)
     
     def _evict_bucket(self, bucket: int):
-        """LFU Eviction – behält die Top-K N-Gramme."""
+        """LFU Eviction – behält die Top-K N-Gramme.
+
+        Die Masse je N-Gramm fuehrt ``self.totals`` bereits mit (in
+        ``learn`` und ``_apply_decay`` synchron gehalten); hier wird sie
+        gelesen, statt fuer jede Eviction alle Zaehler erneut
+        aufzusummieren. Im Replay (Decay feuert dort nie) sind beide
+        Zahlen gleich; live zaehlt ``totals`` auch abgeklungenes
+        Restgewicht mit, das vorher wegfiel.
+        """
         trans = self.transitions[bucket]
         tots = self.totals[bucket]
-        scored = [(sum(trans[ng].values()), ng) for ng in trans]
+        scored = [(tots.get(ng, 0.0), ng) for ng in trans]
         scored.sort(reverse=True)
-        keep = set(ng for _, ng in scored[:self.MAX_NGRAMS_PER_BUCKET])
         for _, ngram in scored[self.MAX_NGRAMS_PER_BUCKET:]:
             del trans[ngram]
             if ngram in tots:
