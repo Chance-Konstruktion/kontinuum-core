@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from benchmarks.spur.messstand import (
     ENGINE_ROH,
+    ENGINE_VOR_RANKING,
     gepaarte_differenz,
     messe,
     messe_ursprung,
@@ -31,8 +32,14 @@ def test_messstand_bewertet_nur_die_testwoche():
     sim = simuliere("klassisch", tage=42, saat=SAAT_KLASSISCH)
     ergebnis = messe_ursprung(sim.spur, train_wochen=4)
     assert ergebnis.test_ereignisse > 0
+    # Befund 1 (MR !4 note 13693), geheilt: die vier SYSTEME tragen JEDES
+    # Testereignis; die Roh-Zeilen leeren sich bei leeren/verworfenen
+    # Ereignissen ehrlich und zählen deshalb HOECHSTENS so viele.
     for name, bilanz in ergebnis.systeme.items():
-        assert bilanz.gesamt == ergebnis.test_ereignisse, name
+        if name in (ENGINE_ROH, ENGINE_VOR_RANKING):
+            assert 0 < bilanz.gesamt <= ergebnis.test_ereignisse, name
+        else:
+            assert bilanz.gesamt == ergebnis.test_ereignisse, name
         assert bilanz.top1 <= bilanz.top3 <= bilanz.gesamt, name
 
 

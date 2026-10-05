@@ -148,7 +148,10 @@ class KontinuumEngine:
         self.spatial_cortex = SpatialCortex()
         self.prefrontal_cortex = PrefrontalCortex(self.amygdala)
         self.anterior_cingulate = AnteriorCingulate()
-        self.entorhinal_cortex = EntorhinalCortex()
+        # Clock hygiene (issue #2, §7 step 6, part 1 — on !8's clock, per
+        # review 03:19): the prune gate runs on the EXPLICIT clock's event
+        # time, mirroring Hypothalamus/LocusCoeruleus from Abnahme 13642.
+        self.entorhinal_cortex = EntorhinalCortex(clock=self._clock)
         self.locus_coeruleus = LocusCoeruleus(clock=self._clock)
         self.nucleus_accumbens = NucleusAccumbens()
         self.reticular = Reticular()
@@ -702,9 +705,14 @@ class KontinuumEngine:
             now_ts = datetime.now(timezone.utc).timestamp()
         if self.tick_count % COMPILE_EVERY == 0:
             self.cerebellum.compile_rules(self.hippocampus)
-        now = time.time()
+        # Clock hygiene (issue #2, §7 step 6, part 1 — Befund 3 in MR !4
+        # note 13693, on !8's clock per review 03:19): the prune cadence
+        # runs in EVENT time — ``now_ts`` above already falls back to the
+        # explicit clock once, consistently —, so backtests prune on the
+        # same schedule a live home would.
+        now = now_ts
         if now - self.entorhinal_cortex.last_prune_ts > ENTORHINAL_PRUNE_SECONDS:
-            self.entorhinal_cortex.prune_old_transitions()
+            self.entorhinal_cortex.prune_old_transitions(now_ts=now_ts)
         # Sleep consolidation runs in EVENT time (not wall-clock), so it behaves
         # identically live and in replay/backtest. Normal path: a quiet spell
         # (≥30 min no events, ≥50 events since last, ≤1×/h) replays/prunes memory,
@@ -747,6 +755,18 @@ class KontinuumEngine:
             "dopamine": round(self.basal_ganglia.dopamine_signal, 3),
             "expected_next_room": self._expected_next_room,
             "raw_prediction_count": len(raw_predictions or []),
+            # Clock-hygiene MR (issue #2 §7 step 6 + Befund 1 in MR !4
+            # note 13693, per review 03:19): the RAW hippocampus list
+            # rides the snapshot — (token, prob, conf) per entry,
+            # decoded — so a measurement can lead "Hippocampus pur" as
+            # its own line, distinct from "before ranking" (which
+            # already carries the cerebellum reflex and interval
+            # timing at the front of the chain).
+            "raw_predictions": [
+                [self.thalamus.decode_token(eintrag[0]),
+                 float(eintrag[1]), float(eintrag[2])]
+                for eintrag in (raw_predictions or [])
+            ],
             "should_consolidate": self.sleep_consolidation.should_consolidate(
                 now_ts if now_ts is not None else datetime.now(timezone.utc).timestamp(),
                 prev_event_ts,

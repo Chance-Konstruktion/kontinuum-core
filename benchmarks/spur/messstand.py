@@ -40,10 +40,18 @@ EIMER = 10
 #: Die vier Systeme des Messstands, in fester Reihenfolge.
 SYSTEME = ("Engine", "B0", "B1", "B2")
 
-#: Dazu die ROHE Hippocampus-Liste vor dem Modul-Ranking — Protokoll § 5
-#: („Rohliste vs. gerankt"): Erst der Vergleich zeigt, ob die Module die
-#: Reihenfolge verbessern oder verschlechtern.
+#: Dazu die ZWEI Roh-Zeilen (Befund 1 in MR !4 note 13693: „‚Rohliste'
+#: ist nicht roh" — der alte Spion fing schon den Kleinhirn-Reflex und
+#: das Intervall-Timing vorn im Ranking-Eingang, maß also „vor dem
+#: Ranking", nicht „Hippocampus pur"). Beide Zeilen führen:
+#:   ENGINE_ROH        = Hippocampus PUR (die raw_predictions aus dem
+#:                       Snapshot, ganz ohne Module an der Kette),
+#:   ENGINE_VOR_RANKING = der Ranking-EINGANG (der alte Spion-Fang:
+#:                       Reflex vorn, Intervall-Timing hinten, vor dem
+#:                       Sortieren). Erst der Dreiklang mit der
+#:                       gerankten Zeile zeigt, wo die Punkte hängen.
 ENGINE_ROH = "Engine roh"
+ENGINE_VOR_RANKING = "Engine vor Ranking"
 
 
 @dataclass
@@ -200,29 +208,55 @@ def _engine_vorhersage(snapshot, engine: KontinuumEngine,
 
 
 class _Rohspion:
-    """Fängt die ROHE Hippocampus-Liste ab, bevor `_rank_predictions` sie
+    """Fängt den RANKING-EINGANG ab, bevor `_rank_predictions` ihn
     umsortiert (Protokoll § 5). Eine Messstand-Huelle: Sie beobachtet,
-    sie veraendert nichts — der Originalaufruf laeuft unveraendert."""
+    sie veraendert nichts — der Originalaufruf laeuft unveraendert.
+
+    Befund 1 (MR !4 note 13693): dies ist NICHT „Hippocampus pur" —
+    am Eingang stehen der Kleinhirn-Reflex vorn und das Intervall-
+    Timing hinten schon eingereiht. Diese Zeile heißt deshalb
+    „Engine vor Ranking"; die pur-Zeile liest den Snapshot
+    (extra["raw_predictions"]).
+
+    Befund 2 (dieselbe Notiz): die Konfidenz kommt aus dem Tupel
+    (Platz 3) — die frühere feste 1.0 ließ die ECE dieser Zeile zur
+    reinen Fehlerquote verkommen."""
 
     def __init__(self, engine: KontinuumEngine):
         self.engine = engine
-        self._roh: List[str] = []
+        self._roh: List[Tuple[str, float]] = []
         self._original = engine._rank_predictions
 
         def fangen(vorhersagen, *args, **kwargs):
+            # Platz 3 des Tupels ist die echte Konfidenz — nicht die
+            # feste 1.0, die die ECE der Zeile wertlos machte.
             self._roh = [
-                self.engine.thalamus.decode_token(eintrag[0])
+                (self.engine.thalamus.decode_token(eintrag[0]),
+                 float(eintrag[2]))
                 for eintrag in (vorhersagen or [])
             ]
             return self._original(vorhersagen, *args, **kwargs)
 
         engine._rank_predictions = fangen  # type: ignore[method-assign]
 
+    def leeren(self):
+        """Befund 1, zweite Hälfte: wird `_rank_predictions` nicht
+        gerufen (leere Liste), darf die Zeile NICHT den Stand des
+        Vorigen Ereignisses zeigen — sie wird vor jedem Ereignis
+        geleert."""
+        self._roh = []
+
     def vorhersage(self) -> List[Tuple[str, float]]:
-        # Konfidenz der Rohliste: dieselbe Anzeige wie im Snapshot
-        # (Platz 3 der Tupel) — die Rohliste traegt (token, prob, conf,
-        # source, n_obs); hier zaehlt die Konfidenz.
-        return [(token, 1.0) for token in self._roh]
+        return self._roh
+
+
+def _pur_vorhersage(snapshot) -> List[Tuple[str, float]]:
+    """Die „Hippocampus pur"-Zeile: die raw_predictions direkt aus dem
+    Snapshot (extra["raw_predictions"], (token, prob, conf) decoded) —
+    ganz ohne Module an der Kette. Leeres Ereignis ⇒ LEERE Zeile
+    (Befund 1: kein Stand vom Vorigen)."""
+    roh = (snapshot.extra or {}).get("raw_predictions") or []
+    return [(str(eintrag[0]), float(eintrag[2])) for eintrag in roh]
 
 
 def messe_ursprung(spur: Spur, train_wochen: int,
@@ -258,12 +292,14 @@ def messe_ursprung(spur: Spur, train_wochen: int,
     engine = _gebaut()
     registriere_engine(engine, spur.kopf.entitaeten)
 
-    namen = list(SYSTEME) + ([ENGINE_ROH] if rohliste else [])
+    namen = list(SYSTEME) + ([ENGINE_ROH, ENGINE_VOR_RANKING]
+                             if rohliste else [])
     systeme = {name: Systembilanz(name) for name in namen}
     schar = gegner(vokabular)
     spion = _Rohspion(engine) if rohliste else None
 
     letzte_engine: List[Tuple[str, float]] = []
+    letzte_pur: List[Tuple[str, float]] = []
     letzte_roh: List[Tuple[str, float]] = []
     for i, ereignis in enumerate(spur.ereignisse):
         # 1) Bewerten (nur Testwoche): die Vorhersage fuer token_i
@@ -281,9 +317,17 @@ def messe_ursprung(spur: Spur, train_wochen: int,
                 "B2": schar["B2"].vorhersage(zeit_davor, 3),
             }
             if spion is not None:
-                vorhersagen[ENGINE_ROH] = letzte_roh
+                vorhersagen[ENGINE_ROH] = letzte_pur
+                vorhersagen[ENGINE_VOR_RANKING] = letzte_roh
             for name, liste in vorhersagen.items():
                 bilanz = systeme[name]
+                if not liste:
+                    # Eine geleerte Roh-Zeile ist kein bewertbares
+                    # Ereignis — sie zählt weder Gesamt noch Treffer
+                    # (ihre gesamt-Zahl ist ehrlich kleiner). Die
+                    # Engine-/Gegner-Zeilen tragen nie leere Listen
+                    # (die Stale-Schule von _engine_vorhersage).
+                    continue
                 bilanz.gesamt += 1
                 bilanz.je_kategorie_gesamt[kat] = \
                     bilanz.je_kategorie_gesamt.get(kat, 0) + 1
@@ -298,6 +342,14 @@ def messe_ursprung(spur: Spur, train_wochen: int,
                         (float(liste[0][1]), 1 if liste[0][0] == ziel else 0)
                     )
 
+        # Befund 1 (MR !4 note 13693), zweite Hälfte: NACH der Bewertung,
+        # VOR dem Lernen werden die Roh-Zeilen GELEERT — war das Ereignis
+        # verworfen oder die Liste leer, zeigen sie beim NÄCHSTEN Urteil
+        # ehrlich LEER statt den Stand des Vorigen.
+        letzte_pur = []
+        letzte_roh = []
+        if spion is not None:
+            spion.leeren()
         # 2) Lernen — alle vier, jedes Ereignis, auch im Training.
         schnappschuss = engine.observe({
             "entity_id": ereignis.entity,
@@ -306,6 +358,7 @@ def messe_ursprung(spur: Spur, train_wochen: int,
             "timestamp": ereignis.ts,
         })
         letzte_engine = _engine_vorhersage(schnappschuss, engine, letzte_engine)
+        letzte_pur = _pur_vorhersage(schnappschuss)
         if spion is not None:
             letzte_roh = spion.vorhersage()
         token_i = ziele[i]
@@ -415,6 +468,7 @@ __all__ = [
     "EIMER",
     "SYSTEME",
     "ENGINE_ROH",
+    "ENGINE_VOR_RANKING",
     "Systembilanz",
     "UrsprungsErgebnis",
     "MessErgebnis",
