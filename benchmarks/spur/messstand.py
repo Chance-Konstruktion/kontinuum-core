@@ -33,6 +33,7 @@ from kontinuum_core import KontinuumEngine
 
 from .gegner import gegner
 from .spur import Entitaet, Spur, kategorie, token_zerlegen, tokenisieren
+from .zeitgeber import Zeitgeber
 
 #: Kalibrierungs-Eimer (0-0,1, …, 0,9-1,0) — Protokoll § 5.
 EIMER = 10
@@ -261,10 +262,19 @@ def _pur_vorhersage(snapshot) -> List[Tuple[str, float]]:
 
 def messe_ursprung(spur: Spur, train_wochen: int,
                    engine_bauer: Optional[Callable[[], KontinuumEngine]] = None,
-                   rohliste: bool = True) -> UrsprungsErgebnis:
+                   rohliste: bool = True,
+                   ereigniszeit: bool = True) -> UrsprungsErgebnis:
     """Ein rollierender Ursprung: die ersten k Wochen lernen, Woche k+1
     bewerten. Alle vier Systeme sehen denselben Strom in derselben
-    Ordnung; gezielt wird nur die Testwoche."""
+    Ordnung; gezielt wird nur die Testwoche.
+
+    ``ereigniszeit=True`` (Standard) schimt die Wanduhr der Engine auf
+    die Ereigniszeit (``zeitgeber.Zeitgeber``) — ohne das messen die
+    Cooldowns (Kleinhirn 300 s, Reticular 5 s, Spatial 60/1800 s) und
+    die circadiane Lernrate die LAUFZEIT des Messlaufs statt des Hauses,
+    und dasselbe Programm liefert je nach CPU-Last andere Zahlen.
+    ``ereigniszeit=False`` laesst die Wanduhr stehen — als Gegenprobe,
+    nicht als Messung."""
     if train_wochen < 1:
         raise ValueError("train_wochen mindestens 1")
     if not spur.ereignisse:
@@ -277,6 +287,11 @@ def messe_ursprung(spur: Spur, train_wochen: int,
 
     vokabular = sorted(set(ziele))  # Existenzwissen (§ 1 Regel 3)
     bauer = engine_bauer or (lambda: KontinuumEngine())
+
+    uhr = Zeitgeber() if ereigniszeit else None
+    if uhr is not None:
+        uhr.stelle(start)   # die Uhr steht auf dem ersten Ereignis
+        uhr.an()            # ... und zwar bevor die Engine gebaut wird
 
     def _gebaut() -> KontinuumEngine:
         maschine = bauer()
@@ -302,6 +317,14 @@ def messe_ursprung(spur: Spur, train_wochen: int,
     letzte_pur: List[Tuple[str, float]] = []
     letzte_roh: List[Tuple[str, float]] = []
     for i, ereignis in enumerate(spur.ereignisse):
+        if ereignis.ts >= test_ende:
+            # Nach dem Testfenster aendert kein Ereignis mehr eine Zahl:
+            # die Vorhersagen fuer die Testwoche stehen fest, danach wird
+            # nichts mehr bewertet. Der Leser erzwingt nicht-absteigende
+            # Zeit (spur.py), also ist der Abbruch exakt. Ohne ihn liefe
+            # jeder Ursprung ueber die GANZE Spur — bei CASAS (1,6 Mio
+            # Ereignisse) der Unterschied zwischen Minuten und Stunden.
+            break
         # 1) Bewerten (nur Testwoche): die Vorhersage fuer token_i
         #    entstand aus dem Zustand nach Ereignis i-1 — auch am
         #    Rand: die letzte Trainingsvorhersage zielt auf das erste
@@ -351,6 +374,8 @@ def messe_ursprung(spur: Spur, train_wochen: int,
         if spion is not None:
             spion.leeren()
         # 2) Lernen — alle vier, jedes Ereignis, auch im Training.
+        if uhr is not None:
+            uhr.stelle(ereignis.ts)   # die Uhr steht auf dem Ereignis
         schnappschuss = engine.observe({
             "entity_id": ereignis.entity,
             "new_state": ereignis.zustand,
@@ -367,6 +392,9 @@ def messe_ursprung(spur: Spur, train_wochen: int,
                 g.beobachte(token_i, ereignis.ts)
             else:
                 g.beobachte(token_i)
+
+    if uhr is not None:
+        uhr.aus()   # die Wanduhr kommt zurueck
 
     test_ereignisse = sum(
         1 for e in spur.ereignisse if grenze_train <= e.ts < test_ende
