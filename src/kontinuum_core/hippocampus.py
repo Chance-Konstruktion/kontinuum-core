@@ -74,7 +74,13 @@ class Hippocampus:
         self.shadow_hits_by_window = {w: 0 for w in self.SHADOW_WINDOWS}
         self.shadow_total_by_window = {w: 0 for w in self.SHADOW_WINDOWS}
         self.total_events = 0
-        self.last_decay_day = int(time.time() / 86400)
+        # Der Tag der TAGES-Decay kommt aus der Ereigniszeit (s. learn);
+        # None heisst "noch kein Ereignis gesehen" — der erste Aufruf
+        # setzt ihn, ohne zu decayen. (Ein GELADENER Stand traegt den
+        # Tag seines Speicherns; laeuft die Ereigniszeit rueckwaerts
+        # dazu — Replay alter Spuren auf geladenem Stand — ruht die
+        # Decay, bis die Ereigniszeit den Stand eingeholt hat.)
+        self.last_decay_day = None
     
     def _context_bucket(self, ctx: list) -> int:
         """
@@ -184,14 +190,31 @@ class Hippocampus:
         neighbors.append(((time_b * self.MODE_GROUPS + mode_b) * self.ENERGY_LEVELS + energy_b) * self.DAY_TYPES + other_d)
         return neighbors
     
+    def _ereignis_tag(self, timestamp) -> int:
+        """Der Kalendertag der Ereigniszeit (Tage seit Epoche)."""
+        if timestamp is not None and hasattr(timestamp, "timestamp"):
+            try:
+                return int(timestamp.timestamp() / 86400)
+            except (TypeError, ValueError, OverflowError, OSError):
+                pass
+        return int(time.time() / 86400)
+
     def learn(self, token_id: int, ctx: list, timestamp, learn_weight: float = 1.0):
         """Lernt aus einem neuen Event. learn_weight moduliert die Lernstärke (Predictive Processing)."""
         self.total_events += 1
 
-        current_day = int(time.time() / 86400)
-        if current_day > self.last_decay_day:
-            self._apply_decay(current_day - self.last_decay_day)
-            self.last_decay_day = current_day
+        # TAGES-Decay in EREIGNISZEIT: Der Zeitstempel ist die Uhr —
+        # live wie im Replay (dort rast der Strom in Millisekunden
+        # durch, die Wanduhr saehe nie einen neuen Tag und die Decay
+        # fiele im Replay komplett aus). Ohne verwertbaren Zeitstempel
+        # faellt die Wanduhr ein, derselbe Rueckfall wie in
+        # engine._maybe_maintain.
+        tag = self._ereignis_tag(timestamp)
+        if self.last_decay_day is None:
+            self.last_decay_day = tag
+        elif tag > self.last_decay_day:
+            self._apply_decay(tag - self.last_decay_day)
+            self.last_decay_day = tag
 
         if self.last_event_time:
             try:
@@ -229,19 +252,12 @@ class Hippocampus:
         self.buffer.append(token_id)
     
     def _evict_bucket(self, bucket: int):
-        """LFU Eviction – behält die Top-K N-Gramme.
-
-        Die Masse je N-Gramm fuehrt ``self.totals`` bereits mit (in
-        ``learn`` und ``_apply_decay`` synchron gehalten); hier wird sie
-        gelesen, statt fuer jede Eviction alle Zaehler erneut
-        aufzusummieren. Im Replay (Decay feuert dort nie) sind beide
-        Zahlen gleich; live zaehlt ``totals`` auch abgeklungenes
-        Restgewicht mit, das vorher wegfiel.
-        """
+        """LFU Eviction – behält die Top-K N-Gramme."""
         trans = self.transitions[bucket]
         tots = self.totals[bucket]
-        scored = [(tots.get(ng, 0.0), ng) for ng in trans]
+        scored = [(sum(trans[ng].values()), ng) for ng in trans]
         scored.sort(reverse=True)
+        keep = set(ng for _, ng in scored[:self.MAX_NGRAMS_PER_BUCKET])
         for _, ngram in scored[self.MAX_NGRAMS_PER_BUCKET:]:
             del trans[ngram]
             if ngram in tots:
@@ -442,7 +458,7 @@ class Hippocampus:
 
     def from_dict(self, data: dict):
         self.total_events = data.get("total_events", 0)
-        self.last_decay_day = data.get("last_decay_day", int(time.time() / 86400))
+        self.last_decay_day = data.get("last_decay_day")
         self.shadow_hits = data.get("shadow_hits", 0)
         self.shadow_misses = data.get("shadow_misses", 0)
         self.shadow_total = data.get("shadow_total", 0)
