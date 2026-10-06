@@ -1,9 +1,41 @@
 """Tests for the Hippocampus n-gram memory module."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from kontinuum_core.hippocampus import Hippocampus
+
+
+def test_tages_decay_rechnet_in_ereigniszeit():
+    """Schritt 6b: Der Decay-Tag kommt aus dem Zeitstempel des Ereignisses
+    — live wie im Replay. Vorher las er ``time.time()``: im Replay alter
+    Spuren fiel die Tages-Decay damit komplett aus (die Wanduhr sah nie
+    einen neuen Tag), und das Ergebnis hing an der Uhr des Rechners."""
+    h = Hippocampus()
+    t0 = datetime(2011, 1, 1, 12, 0, tzinfo=timezone.utc)
+    h.learn(token_id=7, ctx=_ctx(), timestamp=t0)
+    h.learn(token_id=8, ctx=_ctx(), timestamp=t0)
+    bucket = h._context_bucket(_ctx())
+    assert h.transitions[bucket][(7,)][8] == 1.0
+    # 40 Tage spaeter: die Decay laeuft ueber 40 Tage EREIGNISZEIT.
+    h.learn(token_id=9, ctx=_ctx(), timestamp=t0 + timedelta(days=40))
+    nachher = h.transitions[bucket][(7,)][8]
+    assert abs(nachher - Hippocampus.DECAY_RATE ** 40) < 1e-9
+
+
+def test_decay_tag_startet_leer_und_ueberlebt_die_rundreise():
+    """Ein frischer Hippocampus hat noch KEINEN Decay-Tag (der erste
+    ``learn`` setzt ihn aus der Ereigniszeit, ohne zu decayen) — und
+    die Rundreise durch to_dict/from_dict erfindet keinen Wanduhr-Tag."""
+    frisch = Hippocampus()
+    assert frisch.last_decay_day is None
+    kopie = Hippocampus()
+    kopie.from_dict(frisch.to_dict())
+    assert kopie.last_decay_day is None
+    frisch.learn(token_id=1, ctx=_ctx(),
+                 timestamp=datetime(2011, 1, 1, tzinfo=timezone.utc))
+    kopie.from_dict(frisch.to_dict())
+    assert kopie.last_decay_day == frisch.last_decay_day
 
 
 def _ctx(time_marker: float = 0.0) -> list:
