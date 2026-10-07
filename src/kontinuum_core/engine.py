@@ -120,10 +120,11 @@ class KontinuumEngine:
             learned — the Stufe-1 ablation (#2) decides when to switch on.
         claustrum: When True (default), ``snapshot.predictions`` comes from
             the Claustrum, the prediction market that weighs every module
-            by what it actually hits (measured 06.10.2026: +9 to +15 points
-            Top-1 over the best dumb opponent on every CASAS origin; the
-            old ranked chain lost to a 1-gram Markov chain). False keeps
-            the legacy ranked chain as ``snapshot.predictions``.
+            by what it actually hits (measured 07.10.2026 on five CASAS
+            houses: +9.1 to +14.3 points Top-1 over the best dumb opponent
+            at every origin; on the simulation the old ranked chain lost to
+            a 1-gram Markov chain). False keeps the legacy ranked chain as
+            ``snapshot.predictions``.
         lagebild: When True (default), the association cortex keeps the
             joint state of all entities (``unavailable`` included), the
             pair table, presence inference for ``person``/``device_tracker``
