@@ -30,6 +30,12 @@ engine.from_dict(blob)        # wiederherstellen
 
 ## Per-Event-Ablauf von `observe()`
 
+0. **Assoziationskortex** (Lagebild, seit 0.7.0) setzt den Zustand der
+   Entität — **vor** dem Thalamus, damit er auch sieht, was der Thalamus
+   gleich verwirft: `unavailable` wird zum Zustand `weg` (Reifendruck-
+   sensoren, die mit dem Auto wegfahren), `person.*`/`device_tracker.*` sind
+   Ziele der Anwesenheit, auch ohne Raum. Leistungen bekommen gelernte
+   Gerätestufen statt fester Watt-Eimer.
 1. **Thalamus** filtert + tokenisiert → `token_id`, `room`, `semantic`, `state`.
    Gefilterte/leere Events → früher `EngineSnapshot` mit `extra["skipped"]`.
    > **Token-Granularität:** Der Token ist `raum.semantik.zustand`, **nicht**
@@ -50,10 +56,19 @@ engine.from_dict(blob)        # wiederherstellen
    Unsicherheit). **Hippocampus.learn(weight)**.
 8. **Cortisol** + **Serotonin** beobachten (Surprise/Anomalie).
 9. **Basalganglien** (passive Q-Beobachtung), **Cerebellum** (Reflex-Check).
-10. Kandidatenliste bauen: Reflex-Injektion + **Interval-Timing**-Injektion
-    (überfällige Kadenz) → **Re-Ranking** (`_rank_predictions`): Q-Priorität,
-    Accumbens-Bias, Arousal, **Habenula-Suppression**, **Cortisol-Dämpfung**,
-    ACC-`cognitive_control`, Entorhinal-Antizipation.
+10. **Claustrum** (die Börse, seit 0.7.0): Sequenz (Markov 1..3,
+    Witten-Bell), Uhrzeit-Gewohnheit, Folge je Tagesabschnitt, Lagebild und
+    die externen Stimmen (Hippocampus, sicherer Reflex) werden log-linear
+    gemischt; die Gewichte lernt es im Betrieb aus dem, was tatsächlich
+    eintrat (global + je Semantik des letzten Ereignisses). Die
+    **Interval-Timing**-Kadenz stimmt nicht mit („überfällig“ heißt „bald“,
+    nicht „als Nächstes“), sondern bekommt — wie ein sicherer Reflex, den die
+    Börse nicht ohnehin führt — höchstens den **letzten** Platz der Liste.
+    Mit `KontinuumEngine(claustrum=False)` läuft stattdessen die alte Kette:
+    Reflex-Injektion + Interval-Timing-Injektion → **Re-Ranking**
+    (`_rank_predictions`): Q-Priorität, Accumbens-Bias, Arousal,
+    **Habenula-Suppression**, **Cortisol-Dämpfung**, ACC-`cognitive_control`,
+    Entorhinal-Antizipation.
 11. **PFC.evaluate()** (Amygdala-Risiko inklusive) → `Decision`.
 12. **ACC** misst Konflikt; **STN** kann eine handlungsbereite Entscheidung
     auf OBSERVE **zurückstufen** (Hold).
@@ -74,7 +89,7 @@ engine.from_dict(blob)        # wiederherstellen
 | `learning_state` | `cold_start` / `learning` / `stable` |
 | `tick_count` | verarbeitete `observe()`-Aufrufe |
 | `token_id`, `token` | aktuelles Event-Token |
-| `predictions` | gerankte `(token_id, prob, conf, source, n_obs)` |
+| `predictions` | `(token_id, prob, conf, source, n_obs)`, Top 5 der Börse (`source="claustrum"`, `prob` = Wahrscheinlichkeit der Mischung); auf dem letzten Platz ggf. `cerebellum`/`interval_timing`. Mit `claustrum=False` die gerankte alte Kette |
 | `extra` | Reiche Modul-Telemetrie (siehe unten) |
 
 ### `snapshot.extra` — Feld-Referenz
@@ -87,6 +102,9 @@ engine.from_dict(blob)        # wiederherstellen
 | `dopamine` | Basalganglien (mittlerer RPE) |
 | `expected_next_room` | Entorhinal-Antizipation |
 | `raw_prediction_count` | Anzahl Hippocampus-Rohvorhersagen |
+| `raw_predictions` | die Hippocampus-Rohliste `[token, prob, conf]` |
+| `claustrum` | `ueberraschung_bits` (Log-Verlust des eingetretenen Ereignisses — die ehrliche Überraschung der Börse), `trefferquote` (Top-1 seit Start), `gewichte` (gelernte Mischgewichte je Experte) |
+| `predictions_alt` | die alte Kandidatenliste (Hippocampus + Reflex + Intervall, vor dem Ranking) — Vorher/Nachher im selben Lauf |
 | `should_consolidate` | steht eine Schlaf-Konsolidierung an? |
 | `cortisol` | Stress-Level 0–1 |
 | `serotonin` | Stimmungs-/Geduld-Level 0–1 |
@@ -99,6 +117,24 @@ engine.from_dict(blob)        # wiederherstellen
 | `interval_due_token` | gerade injizierte überfällige Kadenz (falls vorhanden) |
 | `reflex` | gefeuerte Cerebellum-Regel (falls vorhanden) |
 | `decision` | PFC-Entscheidung (token, stage, confidence, utility, risk, reasons …) |
+
+## `lagebild()` — Anwesenheit und Zusammenhänge
+
+`engine.lagebild()` gibt die Auskunft des Assoziationskortex:
+
+- `anwesenheit`: je Ziel (`person.*`, `device_tracker.*`) die
+  Wahrscheinlichkeit `zuhause`, die stärksten **Belege** als
+  `(Merkmal, Beitrag)` (positiv spricht für daheim) und die gelernten
+  Gewichte. Gelernt wird, solange der Tracker etwas Bekanntes meldet;
+  schweigt er (`unknown`, Handy aus), schließt der Kortex aus der Lage
+  zurück — Naive Bayes über alle Gerätezustände samt Dauer und
+  Tagesabschnitt, gestapelt mit der Uhrzeit-Gewohnheit, die Gewichte je
+  Entität gelernt (vier Reifen eines Autos sind zusammen nur ein Zeuge).
+- `zusammenhaenge`: die stärksten Paare der Paar-Tafel („wenn A, dann B mit
+  p, `lift`-mal so oft wie sonst“), alle 5 Minuten Ereigniszeit gezählt.
+- `stats`: Entitäten im Blick, Takte, Größe der Tafeln.
+
+Mit `lagebild=False` gibt es keinen Kortex, `lagebild()` ist dann `{}`.
 
 ## `feedback(positive)` — Reward-Loop
 
@@ -143,7 +179,11 @@ Stolperstein beim ersten Anlauf.
   zu laden (dann Cold-Start statt halb verstandenem Zustand). Das aktuelle
   Modul-Set ist **additiv** dazugekommen: ein altes Brain ohne die neuen Keys
   stellt diese Module mit Defaults her, eine alte Engine ignoriert unbekannte
-  Keys — `SCHEMA_VERSION` bleibt daher **1**.
+  Keys — `SCHEMA_VERSION` bleibt daher **1**. Das gilt auch für
+  `association_cortex` und `claustrum` (0.7.0): Ein älteres Brain startet
+  beide frisch, alles andere Gelernte bleibt. Beide speichern ihren offenen
+  Vorhersage-Stand mit — nach dem Laden setzt die Engine bitgleich fort
+  (Test `test_engine_setzt_nach_dem_laden_bitgleich_fort`).
 - Alle gelernten Maps sind **gedeckelt** (LRU-/Stärke-basiertes Eviction) → die
   Datei wächst nicht unbegrenzt, jahrelanger Pi-Betrieb ist sicher.
 

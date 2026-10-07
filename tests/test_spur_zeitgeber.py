@@ -48,11 +48,15 @@ def test_zeitgeber_gibt_die_ereignisstunde_an_die_lernrate():
     """``modulate_learning`` ohne Stunde zieht sonst die Wanduhr-Stunde.
     Mit Zeitgeber gilt die Ereignisstunde — 08:00 ist der circadiane
     Peak (Multiplikator 1,3), 20:00 der Tiefpunkt (0,5)."""
+    # Der feste Faktor ist seit 06.10.2026 aus (neutral 1,0); fuer diesen
+    # Test des Zeitgebers wird er gezielt eingeschaltet.
     rhythm = Neurorhythms()
+    rhythm.CIRCADIAN_FEST = True
     with Zeitgeber() as uhr:
         uhr.stelle(datetime(2011, 6, 1, 8, 0, tzinfo=timezone.utc))
         assert abs(rhythm.modulate_learning(1.0) - 1.3) < 1e-9
         rhythm2 = Neurorhythms()
+        rhythm2.CIRCADIAN_FEST = True
         uhr.stelle(datetime(2011, 6, 1, 20, 0, tzinfo=timezone.utc))
         assert abs(rhythm2.modulate_learning(1.0) - 0.5) < 1e-9
 

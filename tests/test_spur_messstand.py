@@ -12,12 +12,19 @@ den ersten gemessenen Befund fest, statt ihn zu wuenschen —
 Beide Saetze sind BEFUNDE, keine Wünsche: Wer das Ranking verbessert
 oder die Engine staerkt, dreht sie bewusst um — und muss diesen Test
 mitziehen. Genau dafuer steht er hier.
+
+06.10.2026, das Claustrum (Stufe 3): Die Engine ist jetzt die Börse und
+schlaegt B2 deutlich. Die beiden alten Befunde bleiben als Tests der
+ALTEN Kette stehen (``KontinuumEngine(claustrum=False)``) — sie sind die
+Geschichte, an der man den Unterschied misst. Die neuen Zusagen stehen
+darunter.
 """
 from __future__ import annotations
 
 from datetime import timedelta
 
 from benchmarks.spur.messstand import (
+    ENGINE_ALT,
     ENGINE_ROH,
     ENGINE_VOR_RANKING,
     gepaarte_differenz,
@@ -29,6 +36,11 @@ from kontinuum_core import KontinuumEngine
 
 SAAT_KLASSISCH = 1
 SAAT_GERAETE = 1
+
+
+def _alte_kette() -> KontinuumEngine:
+    """Die Engine vor dem Claustrum: gerankte Kette, kein Lagebild."""
+    return KontinuumEngine(claustrum=False, lagebild=False)
 
 
 def test_messstand_liest_nicht_hinter_dem_testende():
@@ -67,8 +79,9 @@ def test_messstand_bewertet_nur_die_testwoche():
     # Befund 1 (MR !4 note 13693), geheilt: die vier SYSTEME tragen JEDES
     # Testereignis; die Roh-Zeilen leeren sich bei leeren/verworfenen
     # Ereignissen ehrlich und zählen deshalb HOECHSTENS so viele.
+    assert ENGINE_ALT in ergebnis.systeme, "die alte Kette fehlt als Zeile"
     for name, bilanz in ergebnis.systeme.items():
-        if name in (ENGINE_ROH, ENGINE_VOR_RANKING):
+        if name in (ENGINE_ROH, ENGINE_VOR_RANKING, ENGINE_ALT):
             assert 0 < bilanz.gesamt <= ergebnis.test_ereignisse, name
         else:
             assert bilanz.gesamt == ergebnis.test_ereignisse, name
@@ -119,7 +132,8 @@ def test_befund_rohliste_schlaegt_ranking():
     wegdiskutiert."""
     for typ in ("klassisch", "geraete"):
         sim = simuliere(typ, tage=42, saat=1)
-        ergebnis = messe_ursprung(sim.spur, train_wochen=4)
+        ergebnis = messe_ursprung(sim.spur, train_wochen=4,
+                                  engine_bauer=_alte_kette)
         roh = ergebnis.systeme[ENGINE_ROH].trefferquote()
         gerankt = ergebnis.systeme["Engine"].trefferquote()
         assert roh > gerankt, (typ, roh, gerankt)
@@ -129,14 +143,14 @@ def test_gepaarte_differenz_wird_berichtet():
     """Abnahme 13642, Punkt 3: je Haus die gepaarte Differenz
     Engine − bester Gegner als Median [Min–Max] ueber die Ursprünge."""
     sim = simuliere("klassisch", tage=56, saat=1)
-    ergebnis = messe(sim.spur, min_train_wochen=4)
+    ergebnis = messe(sim.spur, min_train_wochen=4, engine_bauer=_alte_kette)
     differenz = gepaarte_differenz(ergebnis)
     assert differenz["bester_gegner"] == "B2"
     assert len(differenz["differenzen"]) == len(ergebnis.ursprunge)
     assert differenz["min"] <= differenz["median"] <= differenz["max"]
-    # Befund (mit Zeitgeber): die Differenz ist NEGATIV (B2 fuehrt) —
-    # klassisch −10,2 % [−14,6 .. −4,9], Saat 1, 8 Wochen. Knapp ist
-    # sie nicht.
+    # Befund der ALTEN Kette (mit Zeitgeber): die Differenz ist NEGATIV
+    # (B2 fuehrt) — klassisch −10,2 % [−14,6 .. −4,9], Saat 1, 8 Wochen.
+    # Knapp ist sie nicht.
     assert differenz["median"] < 0
 
 
@@ -151,8 +165,45 @@ def test_befund_b2_ist_der_echte_gegner():
     Tafel zeigen. (Der fruehere Geraete-„Sieg" +7,1 % war ein
     Wanduhr-Artefakt.)"""
     sim = simuliere("klassisch", tage=42, saat=1)
-    ergebnis = messe_ursprung(sim.spur, train_wochen=4)
+    ergebnis = messe_ursprung(sim.spur, train_wochen=4,
+                              engine_bauer=_alte_kette)
     assert ergebnis.systeme["Engine"].trefferquote() > \
         ergebnis.systeme["B1"].trefferquote()
     assert ergebnis.systeme["B2"].trefferquote() > \
         ergebnis.systeme["Engine"].trefferquote()
+
+
+def test_claustrum_schlaegt_jeden_gegner_auf_beiden_haustypen():
+    """ZUSAGE der Börse (06.10.2026): Auf beiden Spielzeug-Häusern liegt
+    die Engine mit Claustrum vor dem besten dummen Gegner, und zwar nicht
+    knapp — gemessen klassisch +26 bis +31, Geräte-Haus +30 bis +34
+    Punkte über alle vier Ursprünge (Saat 1, 8 Wochen). Gefordert werden
+    hier +15, damit eine echte Verschlechterung auffällt und nicht jede
+    Nachkommastelle."""
+    for typ in ("klassisch", "geraete"):
+        sim = simuliere(typ, tage=56, saat=1)
+        ergebnis = messe(sim.spur, min_train_wochen=4)
+        differenz = gepaarte_differenz(ergebnis)
+        assert differenz["min"] > 0.15, (typ, differenz)
+
+
+def test_claustrum_schlaegt_die_alte_kette_im_selben_lauf():
+    """Vorher und Nachher in EINER Messung: Die alte Kette läuft als
+    Zeile „Engine alt“ mit. Die Börse muss sie schlagen, und der
+    Hippocampus allein (roh) darf ihr nicht davonlaufen.
+
+    Gemessen (4 Saaten × 4 Ursprünge, Top-1): klassisch Engine 82,5 /
+    roh 69,3 / alt 53,6; Geräte-Haus 93,5 / 93,2 / 83,6 — im Geräte-Haus
+    ist der Hippocampus allein schon fast so gut, die Börse hält mit ihm
+    Schritt. Hier läuft EIN Ursprung (Saat 1, ~200 Testereignisse, ein
+    Treffer = 0,5 Punkte): klassisch +37 über alt, Geräte-Haus +6, roh
+    −1,6. Gefordert wird darum je Haus, was auch im Rauschen hält."""
+    mindestens_ueber_alt = {"klassisch": 0.15, "geraete": 0.03}
+    for typ in ("klassisch", "geraete"):
+        sim = simuliere(typ, tage=42, saat=1)
+        ergebnis = messe_ursprung(sim.spur, train_wochen=4)
+        neu = ergebnis.systeme["Engine"].trefferquote()
+        alt = ergebnis.systeme[ENGINE_ALT].trefferquote()
+        roh = ergebnis.systeme[ENGINE_ROH].trefferquote()
+        assert neu > alt + mindestens_ueber_alt[typ], (typ, neu, alt)
+        assert neu > roh - 0.03, (typ, neu, roh)

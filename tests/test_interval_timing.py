@@ -13,8 +13,8 @@ from kontinuum_core import KontinuumEngine
 from kontinuum_core.interval_timing import IntervalTiming
 
 
-def _engine() -> KontinuumEngine:
-    e = KontinuumEngine()
+def _engine(claustrum: bool = True) -> KontinuumEngine:
+    e = KontinuumEngine(claustrum=claustrum)
     e.register_entity("switch.kitchen", ha_area="kitchen", domain="switch")
     e.register_entity("light.bedroom_lamp", ha_area="bedroom", domain="light")
     return e
@@ -88,8 +88,71 @@ def test_eviction_bounds_memory():
 # Engine integration
 # ---------------------------------------------------------------------------
 
+def _ueberfaellig_saeen(e: KontinuumEngine, tok: int, now: float) -> None:
+    """Regelmäßige Wochen-Kadenz, zuletzt vor 8 Tagen (überfällig)."""
+    e.interval_timing.timers[tok] = {
+        "last": now - 8 * 24 * 3600, "mean": float(7 * 24 * 3600),
+        "mad": 0.0, "count": 5,
+    }
+
+
 def test_engine_injects_overdue_cadence():
+    """Mit Claustrum (Stufe 3) ist die überfällige Kadenz eine Stimme im
+    Rat: Der Token steht in der Liste und ``extra["interval_due_token"]``
+    nennt ihn. Die Herkunft bleibt ehrlich — führt die Börse den Token
+    ohnehin (hier: einmal gesehen, sonst nichts), steht „claustrum“ dran."""
     e = _engine()
+    s = e.observe({
+        "entity_id": "switch.kitchen", "new_state": "on",
+        "timestamp": datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+    })
+    sw_tok = s.token_id
+    assert sw_tok is not None
+    now_dt = datetime(2026, 2, 1, 12, 0, 0, tzinfo=timezone.utc)
+    _ueberfaellig_saeen(e, sw_tok, now_dt.timestamp())
+    snap = e.observe({
+        "entity_id": "light.bedroom_lamp", "new_state": "on", "timestamp": now_dt,
+    })
+    assert sw_tok in [p[0] for p in snap.predictions]
+    assert snap.extra.get("interval_due_token") == "kitchen.switch.on"
+    assert snap.extra.get("interval_tracked", 0) >= 1
+
+
+def test_engine_overdue_cadence_takes_the_last_place():
+    """Kennt die Börse den überfälligen Token nicht unter ihren besten
+    fünf, rückt er auf den LETZTEN Platz — sichtbar, mit Herkunft
+    „interval_timing“, aber ohne sich vorzudrängeln."""
+    e = _engine()
+    for n in range(6):
+        e.register_entity(f"light.l{n}", ha_area=f"raum{n}", domain="light")
+    s = e.observe({
+        "entity_id": "switch.kitchen", "new_state": "on",
+        "timestamp": datetime(2026, 1, 1, 6, 0, 0, tzinfo=timezone.utc),
+    })
+    sw_tok = s.token_id
+    t = datetime(2026, 1, 1, 7, 0, 0, tzinfo=timezone.utc)
+    for runde in range(8):
+        for n in range(6):
+            for zustand in ("on", "off"):
+                t += timedelta(minutes=3)
+                e.observe({"entity_id": f"light.l{n}", "new_state": zustand,
+                           "timestamp": t})
+    now_dt = t + timedelta(minutes=3)
+    _ueberfaellig_saeen(e, sw_tok, now_dt.timestamp())
+    snap = e.observe({
+        "entity_id": "light.bedroom_lamp", "new_state": "on", "timestamp": now_dt,
+    })
+    assert len(snap.predictions) == KontinuumEngine.CLAUSTRUM_TOP
+    letzter = snap.predictions[-1]
+    assert letzter[0] == sw_tok and letzter[3] == "interval_timing"
+    assert all(p[3] == "claustrum" for p in snap.predictions[:-1])
+    assert snap.extra.get("interval_due_token") == "kitchen.switch.on"
+
+
+def test_engine_injects_overdue_cadence_alte_kette():
+    """Die alte Kette (ohne Claustrum) hängt den Token mit Herkunft
+    „interval_timing“ an — so wie seit v0.6.0."""
+    e = _engine(claustrum=False)
     # One observe to mint a decodable token + capture its id.
     s = e.observe({
         "entity_id": "switch.kitchen", "new_state": "on",

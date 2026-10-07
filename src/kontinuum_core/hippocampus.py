@@ -20,6 +20,7 @@
 ╚══════════════════════════════════════════════════════════════════╝
 """
 
+import heapq
 import logging
 import math
 import time
@@ -252,13 +253,20 @@ class Hippocampus:
         self.buffer.append(token_id)
     
     def _evict_bucket(self, bucket: int):
-        """LFU Eviction – behält die Top-K N-Gramme."""
+        """LFU Eviction – behält die Top-K N-Gramme.
+
+        Gestrichen werden die nach (Summe, N-Gramm) kleinsten — genau die
+        Menge, die „absteigend sortieren, ab Platz K streichen“ trifft, aber
+        ohne die ganze Liste zu sortieren: Meist ist der Eimer nur um ein bis
+        drei N-Gramme übergelaufen. (Profil auf CASAS Cairo: das volle
+        Sortieren kostete 20 % der Engine-Zeit.)"""
         trans = self.transitions[bucket]
         tots = self.totals[bucket]
-        scored = [(sum(trans[ng].values()), ng) for ng in trans]
-        scored.sort(reverse=True)
-        keep = set(ng for _, ng in scored[:self.MAX_NGRAMS_PER_BUCKET])
-        for _, ngram in scored[self.MAX_NGRAMS_PER_BUCKET:]:
+        zuviel = len(trans) - self.MAX_NGRAMS_PER_BUCKET
+        if zuviel <= 0:
+            return
+        scored = [(sum(v.values()), ng) for ng, v in trans.items()]
+        for _, ngram in heapq.nsmallest(zuviel, scored):
             del trans[ngram]
             if ngram in tots:
                 del tots[ngram]

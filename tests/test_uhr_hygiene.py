@@ -102,8 +102,11 @@ def test_raw_predictions_ride_the_snapshot():
 def test_spion_carries_real_confidence_and_empties():
     """Befund 2: the spy's confidence comes from the tuple (place 3) —
     it is NOT the fixed 1.0 that made the ECE a plain error rate.
-    Befund 1, second half: leeren() empties the line (no stale carry)."""
-    e = KontinuumEngine()
+    Befund 1, second half: leeren() empties the line (no stale carry).
+    Der Spion hängt am Ranking-Eingang der ALTEN Kette — mit Claustrum
+    wird dieser Weg nicht gegangen (die alte Kette steht dann als Zeile
+    „Engine alt“ im Messstand)."""
+    e = KontinuumEngine(claustrum=False)
     e.register_entity("sensor.a", ha_area="keller", domain="switch")  # switch: on/off ist die gueltige Ladder
     spion = _Rohspion(e)
     zeilen = []

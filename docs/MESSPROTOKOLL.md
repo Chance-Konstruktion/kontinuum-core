@@ -257,3 +257,197 @@ Rohlisten-Vergleich (§1) hat sie als ersten Prüfstands-Kandidaten gezeigt.
 | 03.10.2026 | **Abnahme** durch Claude: Format ja; mitlernend Hauptzahl; Siegkriterium + gepaarte Differenz; „kein Messpfad“-Zeilen ja; dieses Dokument zuerst; Uhr als Kern-Parameter; Hypothalamus A/B/C | #2, Notiz 13642 |
 | 04.10.2026 | Ergänzung: kein 12-Wochen-Export aus Chris' Haus; Geräte-Haus aus öffentlichen Datensätzen; vier Systeme final | #2, Notiz 13664 |
 | 04.10.2026 | Zwei Diagnosezeilen (Semantik laut Name vs. vergeben; Entitäten je Token) — als Diagnose, nicht als Siegkriterium | #3, Notiz 13646 |
+| 06.10.2026 | Stufe 3: Börse (Claustrum) und Lagebild (Assoziationskortex); Zirkadian-Befund; Zeile „Engine alt“ | #2, §10 |
+| 07.10.2026 | Ergebnis Stufe 3: Simulation, fünf CASAS-Häuser (15 Ursprünge), Anwesenheit, Anomalie, Laufzeit auf PC und ARM | #2, §10 |
+
+---
+
+## 10. Stufe 3: Lagebild und Börse
+
+*Stand 07.10.2026. Autor: Claude (Leit-Ticket #2). Gemessen mit dem
+Messkern aus §1–§5, unverändert; neu ist nur die Zeile „Engine alt“: die
+alte Kandidatenliste läuft im selben Durchgang mit (`extra["predictions_alt"]`),
+Vorher und Nachher stehen damit in EINER Messung.*
+
+### 10.1 Befund vor dem Umbau
+
+- **Die alte Kette verlor gegen B2.** Nachgemessen: klassisch −10,2 %,
+  Geräte-Haus −4,4 % (Saat 1, 8 Wochen). Zwei Ursachen. Erstens zersplittert
+  der Hippocampus sein Gedächtnis in bis zu 96 Kontext-Eimer; im klassischen
+  Haus hat er bei rund 70 % der Ereignisse keinen einzigen Kandidaten über
+  seiner Schwelle. Zweitens stellt das Ranking eingeschleuste Kandidaten
+  (Reflex, überfällige Kadenz) mit fester Konfidenz nach vorn, ohne je zu
+  prüfen, ob sie treffen.
+- **Der Thalamus sieht nicht, was zusammengehört.** `unavailable` wirft er
+  weg — genau das melden Reifendrucksensoren, die mit dem Auto wegfahren.
+  Leistung kennt er nur in festen Eimern (unter 100 W „niedrig“): 3 W Standby
+  und 100 W Betrieb eines PCs sind dasselbe.
+- **Die zirkadiane Lernrate hing an der Uhr des Messlaufs.** Eine feste
+  Kosinuskurve (Tief um 20:00, nicht nachts), im Engine-Pfad mit der
+  Wanduhr-Stunde gefüttert: Derselbe Strom lernte je nach Uhrzeit des Laufs
+  anders. Im Anomalie-Benchmark mit Ereignisstunde (`benchmarks/replay.py`,
+  wie live, ohne Zeitgeber) gemessen: AUC 0,948, P 0,36, R 0,25.
+
+### 10.2 Was gebaut wurde
+
+- **Claustrum** (`claustrum.py`), die Börse: Sequenz (Markov 1..3,
+  Witten-Bell, ohne Eimer), Uhrzeit-Gewohnheit, Folge je Tagesabschnitt,
+  Lage-Experte und die externen Stimmen (Hippocampus, sicherer Reflex)
+  werden log-linear gemischt. Die Gewichte lernt sie im Betrieb aus dem, was
+  eintrat (Gradient der Log-Likelihood, RMSprop, global plus je Semantik des
+  letzten Ereignisses). Die Intervall-Uhr stimmt nicht mit; eine überfällige
+  Kadenz und ein Reflex, den die Börse nicht ohnehin führt, bekommen
+  höchstens den letzten Platz.
+- **Assoziationskortex** (`association_cortex.py`), das Lagebild: jede
+  Entität in genau einem Zustand, `unavailable` als `weg`, Leistungen in
+  gelernten Gerätestufen; alle 5 Minuten Ereigniszeit eine Paar-Tafel „alle
+  gegen alle“; Anwesenheit je `person`/`device_tracker` allein aus den
+  Geräten (Naive Bayes über Zustand, Dauer und Tagesabschnitt, gestapelt mit
+  der Uhrzeit-Gewohnheit, Gewichte je Entität mit AdaGrad, Zählung einen Tag
+  verzögert); dazu der Lage-Experte der Börse.
+- **Engine:** Lagebild VOR dem Thalamus, Börse statt Ranking für
+  `snapshot.predictions`. Vorhersage und Vorschlag sind getrennt: Was der PFC
+  vorschlägt, rankt weiter mit den Rückmeldungen (Habenula, Accumbens,
+  Basalganglien), jetzt auf den Kandidaten der Börse. `surprise`/`anomaly`
+  bleiben auf dem Hippocampus-Pfad.
+- **Neurorhythms:** feste Kurve aus (`CIRCADIAN_FEST = False`, Faktor 1,0);
+  die Engine reicht die Ereignisstunde durch.
+
+### 10.3 Nächstes Ereignis (Top-1, Engine-Ebene)
+
+**Simulation** (4 Saaten × 4 Ursprünge, 8 Wochen; n = 3.279 / 3.839):
+
+| Haus | Engine | Engine alt | Engine roh | B2 | B1 | B0 |
+|---|---|---|---|---|---|---|
+| klassisch | **82,5** | 53,6 | 69,3 | 56,2 | 23,5 | 0,0 |
+| Geräte | **93,5** | 83,6 | 93,2 | 60,8 | 31,2 | 8,8 |
+
+Abschaltproben in denselben Läufen: ohne Lage-Experte 81,9 / 92,2 (der
+Experte bringt +0,6 / +1,3), ohne externe Stimme 82,4 / 93,8 (keine
+messbare Wirkung — der Hippocampus sagt nichts, was die Sequenz nicht
+schon weiß; sein Gewicht lernt die Börse leicht negativ).
+
+**CASAS** (je Ursprung k Wochen Training, Woche k+1 Test; alle Systeme im
+selben Strom):
+
+| Haus | k | Testereignisse | Engine | Engine alt | Engine roh | B2 | B1 | Δ B2 | Δ alt | Top-3 Engine / B2 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| aruba | 4 | 53.093 | **51,2** | 41,7 | 42,0 | 39,2 | 5,6 | **+12,1** | +9,6 | 82,1 / 61,3 |
+| aruba | 8 | 61.583 | **51,8** | 42,0 | 42,6 | 40,2 | 7,5 | **+11,6** | +9,8 | 82,2 / 61,2 |
+| aruba | 12 | 47.088 | **55,9** | 44,6 | 45,0 | 42,4 | 6,5 | **+13,4** | +11,3 | 86,2 / 65,0 |
+| cairo | 4 | 72.401 | **48,6** | 37,2 | 37,7 | 34,4 | 3,9 | **+14,3** | +11,5 | 82,0 / 60,0 |
+| cairo | 5 | 73.587 | **46,0** | 35,3 | 35,9 | 32,9 | 5,7 | **+13,2** | +10,8 | 79,2 / 57,1 |
+| cairo | 6 | 71.050 | **49,2** | 37,9 | 38,5 | 35,4 | 5,6 | **+13,8** | +11,3 | 81,9 / 60,5 |
+| milan | 4 | 12.440 | **54,1** | 47,4 | 47,6 | 44,9 | 4,1 | **+9,2** | +6,7 | 82,2 / 64,9 |
+| milan | 6 | 42.209 | **52,0** | 43,5 | 43,9 | 40,9 | 3,8 | **+11,2** | +8,6 | 81,6 / 62,3 |
+| milan | 8 | 47.350 | **53,9** | 45,1 | 45,8 | 42,5 | 6,2 | **+11,5** | +8,8 | 82,5 / 63,5 |
+| tulum1 | 4 | 17.248 | **54,9** | 51,2 | 51,8 | 45,8 | 11,7 | **+9,1** | +3,8 | 89,4 / 71,3 |
+| tulum1 | 6 | 20.415 | **43,1** | 37,7 | 38,4 | 33,6 | 6,2 | **+9,5** | +5,4 | 76,1 / 53,9 |
+| tulum1 | 8 | 21.459 | **44,3** | 36,7 | 37,1 | 34,1 | 7,2 | **+10,2** | +7,6 | 79,1 / 55,4 |
+| tulum2 | 4 | 57.422 | **47,0** | 38,5 | 38,9 | 35,6 | 4,6 | **+11,4** | +8,5 | 80,1 / 58,5 |
+| tulum2 | 8 | 49.270 | **44,0** | 35,7 | 35,8 | 32,7 | 4,3 | **+11,3** | +8,4 | 77,0 / 55,6 |
+| tulum2 | 12 | 48.222 | **48,1** | 38,8 | 39,4 | 35,6 | 5,1 | **+12,5** | +9,4 | 81,0 / 58,3 |
+
+Über alle 15 Ursprünge: **+9,1 bis +14,3 Punkte über B2**, +3,8 bis +11,5 über die alte Kandidatenliste; Top-3 76,1–89,4 % (alte Liste 55,8–78,2 %, B2 53,9–71,3 %).
+
+**Siegkriterium (§4) erfüllt:** Die Engine liegt in jedem Haus und in jedem
+Ursprung strikt vor B0, B1 und B2. `Engine alt` ist die alte
+Kandidatenliste VOR dem Ranking (Hippocampus, Reflex, Intervall) — die
+stärkere Lesart der alten Kette, denn das Ranking machte sie schlechter
+(§5, Rohliste). Auch sie und der Hippocampus allein (`Engine roh`) liegen
+in jedem Ursprung zurück.
+
+**Gegenprobe:**
+
+- **Kalibrierung** (ECE der Top-1-Konfidenz): Engine 3,8–9,0 % auf der
+  Simulation, 4,1 % auf Milan (k=4); die alte Kette 13–50 %. In der Mitte
+  ist die Börse leicht übersicher (Eimer 0,7–0,8: Quote 0,62).
+- **Anomalie-Trennung:** siehe 10.5 — besser, nicht schlechter.
+
+### 10.4 Anwesenheit (Lagebild)
+
+Protokoll (`benchmarks/spur/anwesenheit.py`): Fünf-Minuten-Takte; im
+Training sind die Tracker die Etiketten, in der Testwoche werden sie
+versteckt (`unknown`). Gegner: P0 (häufigster Zustand), P1
+(Uhrzeit-Gewohnheit je Wochenende/Stunde), P2 (Aktivität in der letzten
+Stunde). Kennzahl: ausgewogene Trefferquote (Mittel aus „daheim richtig“
+und „weg richtig“), denn wer immer „daheim“ sagt, hat sonst schon 80 %.
+
+| Haus | Ursprung | Lagebild | bester Gegner | Brier Lagebild |
+|---|---|---|---|---|
+| Simulation A (Saat 1/2/3) | k=4 | 94,1 / 85,5 / 91,7 | 61,7 / 50,0 / 77,4 | 0,041 / 0,108 / 0,090 |
+| Simulation B (Saat 1/2/3) | k=4 | 95,4 / 95,2 / 88,3 | 91,2 / 91,7 / 91,6 | 0,031 / 0,027 / 0,063 |
+| CASAS Aruba | k=4 / 8 / 12 | 88,1 / 87,8 / 83,5 | 71,4 / 60,7 / 63,7 | 0,039 / 0,031 / 0,053 |
+| CASAS Tulum1 | k=4 / 6 / 8 | 88,8 / **50,1** / 88,8 | 91,0 / 87,6 / 88,2 | 0,090 / 0,103 / 0,103 |
+
+Simulierter Haushalt: zwei Personen, ein Auto mit vier
+Reifendrucksensoren, Fernseher, PC (Router-Erreichbarkeit und Leistung),
+Handys als Tracker mit Verspätung und WLAN-Flattern. Person A arbeitet oft
+zu Hause am PC — ihre Anwesenheit verrät die Lage, nicht die Uhr. Person B
+hat feste Zeiten; dort ist die Uhrzeit schon stark. CASAS hat keine
+Tracker: Das Etikett stammt aus den Aktivitäten `Leave_Home`/`Enter_Home`.
+
+**Bekannte Schwäche (Tulum1, k=6):** Eine ganze Testwoche lang erkennt das
+Lagebild keine Abwesenheit (p(daheim) während der Abwesenheit im Median
+0,70, daheim 0,98 — die Reihenfolge stimmt, die Schwelle nicht); die
+Uhrzeit allein hatte 87,6 %. Tulum ist eine Wohnung für zwei, das Etikett
+gehört einer Person, und die Geräte zeigen oft die andere. Die Lage lernt
+dann eine Achse Richtung „daheim“ (+2,1) und traut der Uhr wenig (0,25).
+Eine Mischung mit der Uhrzeit nach jüngster Bilanz half nicht — im Training
+war das Lage-Modell besser. Offen für Stufe 4: Etiketten je Person bei
+mehreren Bewohnern, oder eine Kalibrierung, die ohne Etikett weiterlernt.
+
+Die Tracker sind nie Merkmal: Ihr Zustand ist das Etikett. Als Indiz spräche
+das Lagebild dem Handy nur nach, statt ihm zu widersprechen, wenn es im Büro
+liegt (Test `test_die_lage_spricht_dem_handy_nicht_nach`).
+
+### 10.5 Anomalie
+
+| Messung | vorher | nachher |
+|---|---|---|
+| Anomalie-Benchmark mit Ereignisstunde (`replay.py`-Routine, ohne Zeitgeber) | AUC 0,948, P 0,36, R 0,25 | AUC 0,999, P 1,00, R 1,00 |
+| dasselbe, Routine mit ±10 min Streuung | — | AUC 0,978, P 0,91, R 1,00 |
+| Überraschung der Börse (Bits) als Anomalie-Signal | — | AUC 0,73, P 0,52, R 0,51 |
+| kontinuum-ai-anomaly, Messstand (5 Saaten) | Tafel | bitgleich |
+
+Die Börse ist der bessere Vorhersager, aber kein besserer Anomalie-Melder:
+Ihr Log-Verlust bleibt Telemetrie (`extra["claustrum"]["ueberraschung_bits"]`),
+`surprise`/`anomaly` kommen weiter aus dem Hippocampus-Pfad.
+
+### 10.6 Laufzeit (Raspberry Pi als Mindestmaß)
+
+Je Ereignis, ganze Engine, Cairo (dichtes Haus), erste 6.000 Ereignisse:
+
+| Maschine | alte Engine | neu (Börse + Lagebild) | neu ohne Lage-Experte |
+|---|---|---|---|
+| PC (Ryzen, Python 3.14) | 0,69 ms | 1,40 ms | 0,92 ms |
+| Huawei P smart 2019 (Kirin 710, ARM64, Termux, Python 3.14) | 11,5 ms | 21,6 ms | 14,9 ms |
+
+Die Börse kostet rund ein Drittel mehr, der Lage-Experte noch einmal so
+viel. Ein Raspberry Pi 4 (Cortex-A72, 1,5–1,8 GHz) sollte in derselben
+Größenordnung wie das Telefon liegen — gemessen ist das nicht. Ein Haus mit
+5.000 Ereignissen am Tag braucht damit auf ARM rund 110 Sekunden CPU am Tag,
+ein dichtes wie Cairo (~10.000) rund 220 — unter 0,3 % eines Kerns.
+
+Gespeichertes Gehirn nach 100.000 Cairo-Ereignissen: 2,1 MB JSON (gzip
+0,52 MB) statt 0,7 MB (0,25 MB); davon Börse 1,0 MB, Lagebild 0,3 MB.
+
+Zwei bitgleiche Beschleunigungen gehören dazu (Profil auf Cairo): Die
+Hippocampus-Eviction sortierte bei fast jedem Ereignis alle 1.000 N-Gramme
+eines Eimers, um ein bis drei zu streichen (20 % der Engine-Zeit, jetzt
+`nsmallest`); die Lage-Schleife (Merkmale × Kandidaten) rechnet `BETA·P(y)`
+einmal je Kandidat statt je Paar. Zusammen −15 %.
+
+Speicher ist gedeckelt: Sequenz und Folge je 20.000 Kontexte (dann
+verdrängt), Lagebild 96 Entitäten im Blick, Paar-Tafel 192 × 192 Merkmale,
+je Merkmal höchstens 128 Folgen.
+
+### 10.7 Bitgleichheit
+
+- Nach `to_dict()` → JSON → `from_dict()` setzt die Engine Ereignis für
+  Ereignis bitgleich fort (Test `test_engine_setzt_nach_dem_laden_bitgleich_fort`);
+  Börse und Lagebild speichern dafür ihren offenen Vorhersage-Stand mit.
+- Die Beschleunigungen (Hippocampus-Eviction, Lage-Schleife) und der Umbau
+  auf `lage_setzen()`/`boersen_liste()` sind bitgleich: 20.000 Ereignisse
+  Cairo, gleicher Hash der Vorhersagen und des Gesamtzustands vorher und
+  nachher.
