@@ -203,3 +203,56 @@ def test_die_lage_spricht_dem_handy_nicht_nach():
         k.setze(TRACKER["b"], meldet, ende)
         schaetzungen.append(k.anwesenheit(TRACKER["a"], ende)["zuhause"])
     assert schaetzungen[0] == schaetzungen[1] == schaetzungen[2]
+
+
+def _zusammenhaenge_referenz(k, entity_id=None, top=10, min_takte=12.0):
+    """Die erste Fassung: rundet und sortiert jedes Paar der Tafel."""
+    k._paar_nachtragen()
+    if k.paar_takte <= 0:
+        return []
+    breite = k.MAX_PAAR_MERKMALE
+    n = len(k.paar_merkmale)
+    diag = [k.paar[i * breite + i] for i in range(n)]
+    aus = []
+    for i in range(n):
+        e_i, z_i = k.paar_merkmale[i]
+        if entity_id is not None and e_i != entity_id:
+            continue
+        if diag[i] < min_takte:
+            continue
+        for j in range(n):
+            e_j, z_j = k.paar_merkmale[j]
+            if e_j == e_i or diag[j] <= 0:
+                continue
+            gemeinsam = k.paar[i * breite + j]
+            if gemeinsam < min_takte:
+                continue
+            p = gemeinsam / diag[i]
+            lift = p / (diag[j] / k.paar_takte)
+            aus.append({
+                "wenn": f"{e_i}={z_i}", "dann": f"{e_j}={z_j}",
+                "p": round(p, 3), "lift": round(lift, 2),
+                "takte": int(gemeinsam),
+            })
+    aus.sort(key=lambda d: (-(d["lift"] * min(1.0, d["p"] * 2)), d["wenn"], d["dann"]))
+    return aus[:top]
+
+
+def test_zusammenhaenge_bitgleich():
+    """Die schnelle Lesung (nur runden, was gewinnen kann) gibt dieselbe
+    Liste wie die erste Fassung — auch an den Rändern: kleine und volle
+    Tafel, eine Entität, top größer als alle Paare, top 0."""
+    for saat, anzahl, ereignisse in ((1, 6, 1500), (2, 40, 12000), (3, 120, 30000)):
+        k = AssociationCortex()
+        wuerfel = random.Random(saat)
+        gewicht = [wuerfel.random() ** 3 for _ in range(anzahl)]
+        t = START
+        for nr in range(ereignisse):
+            t += timedelta(seconds=wuerfel.randint(5, 120))
+            e = wuerfel.choices(range(anzahl), gewicht)[0]
+            k.setze(f"switch.e{e}", wuerfel.choice(["on", "off", "idle"]), t)
+            if nr % 300 == 0:
+                k.setze("person.a", wuerfel.choice(["home", "not_home"]), t)
+        for kw in ({}, {"top": 50}, {"top": 100000}, {"top": 0}, {"min_takte": 1.0},
+                   {"entity_id": "switch.e1"}, {"entity_id": "person.a", "top": 3}):
+            assert k.zusammenhaenge(**kw) == _zusammenhaenge_referenz(k, **kw), (saat, kw)
