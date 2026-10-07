@@ -131,8 +131,11 @@ def zerlege_zeile(zeile: str, zonen_info, nummer: int = 0) -> Zeile:
     if not treffer:
         raise CasasFehler(f"Zeile {nummer} nicht lesbar: {zeile[:60]!r}")
     zone, _name = zonen_info
+    # fromisoformat kann vor Python 3.11 nur 3 oder 6 Nachkommastellen
+    hms, punkt, bruch = treffer.group("zeit").partition(".")
+    zeit = hms + (punkt + bruch.ljust(6, "0")[:6] if punkt else "")
     ts = datetime.fromisoformat(
-        f"{treffer.group('datum')}T{treffer.group('zeit')}"
+        f"{treffer.group('datum')}T{zeit}"
     ).replace(tzinfo=zone)
     rest = (treffer.group("rest") or "").strip() or None
     return Zeile(ts=ts, sensor=treffer.group("sensor").lower(),
