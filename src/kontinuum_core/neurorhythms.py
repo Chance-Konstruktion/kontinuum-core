@@ -42,7 +42,7 @@ _LOGGER = logging.getLogger(__name__)
 
 def _circadian_base(hour: int) -> float:
     """Basis-Circadian-Kurve als Cosinus mit Peak um 8 Uhr."""
-    # Peak bei 8:00, Tief bei 2:00
+    # Peak bei 8:00, Tief bei 20:00 (nicht 2:00, wie hier frueher stand)
     phase = (hour - 8) / 24.0 * 2 * math.pi
     return 0.5 + 0.5 * math.cos(phase)  # Range 0.0 - 1.0
 
@@ -92,11 +92,27 @@ class Neurorhythms:
     # Circadian
     # ══════════════════════════════════════════════════════════
 
+    #: Der feste Cosinus (Peak 8:00) als Lernraten-Faktor. Seit 06.10.2026
+    #: AUS (Faktor 1,0), gemessen im Anomalie-Benchmark mit Ereignisstunde,
+    #: also so, wie die Engine live läuft: Mit festem Faktor fand die
+    #: Anomalie-Erkennung 25 % der Anomalien bei 36 % Präzision und schlug
+    #: in einem unruhigen, normalen Haus bei 20 % der Ereignisse Alarm;
+    #: neutral sind es 100 % / 100 % / 0 %. Die bisherigen Benchmark-Zahlen
+    #: (AUC 1,0) galten nur im Replay, weil dort die Wanduhr während des
+    #: ganzen Laufs auf derselben Stunde stand. Dazu lag das Tief der Kurve
+    #: nicht nachts, sondern um 20:00 — wenn in Häusern am meisten passiert.
+    #: Den Tagesrhythmus DIESES Hauses lernt das SCN (±15 %).
+    CIRCADIAN_FEST = False
+
     def get_circadian_multiplier(self, hour: int = None) -> float:
         """
         Gibt den aktuellen circadianen Lernraten-Multiplikator zurück.
-        Range: 0.5 (Nacht) bis 1.3 (Morgen-Peak).
+        Neutral (1,0), solange ``CIRCADIAN_FEST`` aus ist; sonst
+        0,5 (Tief um 20:00) bis 1,3 (Peak um 8:00).
         """
+        if not self.CIRCADIAN_FEST:
+            self.circadian_multiplier = 1.0
+            return 1.0
         now = time.time()
         # Nur alle 60s neu berechnen
         if now - self._last_circadian_update > 60 or hour is not None:

@@ -5,6 +5,8 @@ pipeline. It is HA-free and can be used standalone or embedded in a
 host integration (ha-kontinuum, ha-kontinuum-lite).
 
 Per-event pipeline (the modules that influence the decision):
+    association_cortex.setze()→ Lagebild: every state change, incl.
+                                ``unavailable`` and room-less entities
     thalamus.process()        → token_id + normalized state
     locus_coeruleus           → arousal (event density)
     hypothalamus.absorb()     → homeostasis side-channel; significant
@@ -27,6 +29,10 @@ Per-event pipeline (the modules that influence the decision):
     lateral_habenula          → anti-reward suppression of chronic rejects
     cortisol.damping()        → conservative ranking under sustained stress
     anterior_cingulate        → conflict monitor → cognitive_control damping
+    claustrum                 → the prediction market: sequence, time habit,
+                                Lagebild, hippocampus and reflex are weighed
+                                by what they actually hit (an overdue
+                                interval takes the last place at most)
     prefrontal_cortex.evaluate→ advisory Decision (SHADOW mode: never acts)
     subthalamic_nucleus       → "hold your horses" brake under conflict
 
@@ -46,6 +52,8 @@ from typing import Any, Dict, List, Optional
 
 from .acetylcholine import Acetylcholine
 from .amygdala import Amygdala
+from .association_cortex import AssociationCortex, lage_setzen
+from .claustrum import Claustrum, boersen_liste
 from .anterior_cingulate import AnteriorCingulate
 from .basal_ganglia import BasalGanglia
 from .bdnf import Bdnf
@@ -110,6 +118,16 @@ class KontinuumEngine:
             tokens (issue #4). Default False: they are observed (they still
             ride the snapshot as ``extra["house_transition"]``) but not
             learned — the Stufe-1 ablation (#2) decides when to switch on.
+        claustrum: When True (default), ``snapshot.predictions`` comes from
+            the Claustrum, the prediction market that weighs every module
+            by what it actually hits (measured 06.10.2026: +9 to +15 points
+            Top-1 over the best dumb opponent on every CASAS origin; the
+            old ranked chain lost to a 1-gram Markov chain). False keeps
+            the legacy ranked chain as ``snapshot.predictions``.
+        lagebild: When True (default), the association cortex keeps the
+            joint state of all entities (``unavailable`` included), the
+            pair table, presence inference for ``person``/``device_tracker``
+            and the Lagebild expert for the Claustrum.
     """
 
     def __init__(
@@ -118,6 +136,8 @@ class KontinuumEngine:
         scheduler: Optional[Scheduler] = None,
         storage_path: Optional[str] = None,
         learn_house_transitions: bool = False,
+        claustrum: bool = True,
+        lagebild: bool = True,
     ):
         """``config`` kann ``{"clock": aufrufbar}`` tragen (Abnahme 13642):
         eine explizite Uhr (Epoch-Sekunden, Standard ``time.time``). Sie
@@ -186,6 +206,14 @@ class KontinuumEngine:
         )
         self.tick_count = 0
 
+        # Stufe 3 (kontinuum-core#2): Lagebild + Vorhersage-Börse.
+        self.association_cortex: Optional[AssociationCortex] = (
+            AssociationCortex() if lagebild else None
+        )
+        self.claustrum: Optional[Claustrum] = (
+            Claustrum(lage=self.association_cortex) if claustrum else None
+        )
+
         # Engine-level cross-event state.
         self._last_room: Optional[str] = None
         self._expected_next_room: Optional[str] = None
@@ -231,6 +259,12 @@ class KontinuumEngine:
             self._clock(), tz=timezone.utc
         )
         old_state = event.get("old_state")
+
+        # Lagebild ZUERST: Der Kortex sieht jede Zustandsänderung, auch die,
+        # die der Thalamus gleich verwirft (``unavailable`` — Reifendruck-
+        # sensoren, die mit dem Auto wegfahren — und Entitäten ohne Raum).
+        if self.association_cortex is not None:
+            self._lage_setzen(entity_id, new_state, timestamp)
 
         signal = self.thalamus.process(entity_id, new_state, old_state, timestamp)
         if signal is None:
@@ -316,7 +350,14 @@ class KontinuumEngine:
         # Neurorhythms: register surprise + modulate the learning rate
         # (circadian rhythm and dopamine bursts).
         self.neurorhythms.register_surprise(token_id, surprise)
-        learn_weight = self.neurorhythms.modulate_learning(learn_weight)
+        # Die Stunde des EREIGNISSES, nicht der Wanduhr: Ohne sie las der
+        # zirkadiane Faktor ``datetime.now()`` — dieselbe Spur lernte um
+        # 08:50 mit Faktor 1,30 und um 19:13 mit 0,51 (DeepSeek, #2 Notiz
+        # 14553). Der Messstand hatte das nur mit dem Zeitgeber überdeckt;
+        # hier ist die Ursache behoben, der Anomalie-Benchmark hängt damit
+        # nicht mehr an der Uhrzeit des Testlaufs.
+        event_hour = timestamp.hour if hasattr(timestamp, "hour") else None
+        learn_weight = self.neurorhythms.modulate_learning(learn_weight, hour=event_hour)
 
         # Suprachiasmatic nucleus: entrain to THIS home's activity rhythm and
         # nudge the learning rate (±15%) toward the household's real day. Starts
@@ -401,20 +442,38 @@ class KontinuumEngine:
             if due is not None and not any(p[0] == due[0] for p in (predictions or [])):
                 predictions = (predictions or []) + [due]
                 interval_injected = due[0]
-        if predictions:
-            predictions = self._rank_predictions(predictions, bucket, room, timestamp)
+        legacy_predictions = None
+        if self.claustrum is not None:
+            # Die Börse: Hippocampus, Reflex und Intervall sind Stimmen im
+            # Rat, keine Vordrängler. Was sie taugen, misst der Mischer.
+            legacy_predictions = predictions
+            predictions = self._claustrum_vorhersage(
+                token_id, timestamp, semantic, raw_predictions, fired_rule,
+                interval_injected)
+            # Vorhersage und Vorschlag sind zweierlei: Die Börse sagt, was
+            # als Nächstes geschieht. Was KONTINUUM davon vorschlägt, wägt
+            # weiter das Ranking mit den Rückmeldungen des Nutzers ab
+            # (Habenula unterdrückt Abgelehntes, Accumbens und Basalganglien
+            # bevorzugen Bewährtes) — jetzt auf den Kandidaten der Börse.
+            entscheidungsliste = (
+                self._rank_predictions(predictions, bucket, room, timestamp)
+                if predictions else predictions)
+        else:
+            if predictions:
+                predictions = self._rank_predictions(predictions, bucket, room, timestamp)
+            entscheidungsliste = predictions
 
         # PFC decision (the amygdala risk assessment runs inside evaluate()).
         # Default operation mode is SHADOW: the core only *recommends*.
         decision = self.prefrontal_cortex.evaluate(
-            predictions, self.thalamus, self.basal_ganglia, bucket
+            entscheidungsliste, self.thalamus, self.basal_ganglia, bucket
         )
 
         # ACC conflict monitor: how much do the module votes disagree? Feeds
         # cognitive_control, which damps confidence in the NEXT ranking round.
         self.anterior_cingulate.observe_decision(
             self._build_acc_proposals(
-                raw_predictions, predictions, fired_rule, decision
+                raw_predictions, entscheidungsliste, fired_rule, decision
             )
         )
 
@@ -423,8 +482,9 @@ class KontinuumEngine:
         # acting. Serotonin (patience) tunes how readily it holds. In SHADOW the
         # decision is already OBSERVE, so this only ever brakes an actionable
         # stage — a safety net, never a new action.
-        top_conf = predictions[0][2] if predictions else 0.0
-        runner_up = predictions[1][2] if predictions and len(predictions) > 1 else 0.0
+        top_conf = entscheidungsliste[0][2] if entscheidungsliste else 0.0
+        runner_up = (entscheidungsliste[1][2]
+                     if entscheidungsliste and len(entscheidungsliste) > 1 else 0.0)
         stn_brake = self.subthalamic.compute_brake(
             self.anterior_cingulate.conflict_level, top_conf, runner_up
         )
@@ -465,9 +525,47 @@ class KontinuumEngine:
             extra=self._build_extra(
                 raw_predictions, fired_rule, decision, anomaly_threshold,
                 prev_event_ts, stn_brake, stn_hold, interval_injected, now_ts,
-                house_transition_token,
+                house_transition_token, legacy_predictions,
             ),
         )
+
+    # ------------------------------------------------------------------
+    # Stufe 3: Lagebild + Claustrum
+    # ------------------------------------------------------------------
+    def _lage_setzen(self, entity_id: str, new_state: Any, timestamp) -> None:
+        """Eine Zustandsänderung ins Lagebild — Thalamus-Lesart wo es eine
+        gibt, Gerätestufen für Leistungen, ``weg`` für unavailable."""
+        lage_setzen(self.association_cortex, self.thalamus, entity_id,
+                    new_state, timestamp)
+
+    #: So viele Vorhersagen trägt der Snapshot (wie die alte Kette: top 5).
+    CLAUSTRUM_TOP = 5
+
+    def _claustrum_vorhersage(self, token_id, timestamp, semantic,
+                              raw_predictions, fired_rule, interval_injected):
+        # Stimmen im Rat: Hippocampus (Wahrscheinlichkeit) und ein sicherer
+        # Reflex. Die Intervall-Uhr stimmt NICHT mit — sie bekommt, wie ein
+        # Reflex, den die Börse nicht ohnehin führt, höchstens den letzten
+        # Platz (``boersen_liste``).
+        reflex = None
+        if fired_rule is not None and fired_rule.confidence >= 0.7:
+            reflex = (fired_rule.target, fired_rule.confidence,
+                      fired_rule.successes + 50)
+        return boersen_liste(self.claustrum, token_id, timestamp, semantic,
+                             hippocampus=raw_predictions, reflex=reflex,
+                             faellig=interval_injected, top=self.CLAUSTRUM_TOP)
+
+    def lagebild(self) -> Dict[str, Any]:
+        """Auskunft des Assoziationskortex: Anwesenheit je Ziel (mit Belegen)
+        und die stärksten Zusammenhänge der Paar-Tafel."""
+        if self.association_cortex is None:
+            return {}
+        kortex = self.association_cortex
+        return {
+            "anwesenheit": {ziel: kortex.anwesenheit(ziel) for ziel in kortex.ziele},
+            "zusammenhaenge": kortex.zusammenhaenge(top=10),
+            "stats": kortex.stats,
+        }
 
     def evaluate(self, context: Optional[Dict[str, Any]] = None) -> EngineSnapshot:
         return self.observe(context or {})
@@ -490,6 +588,8 @@ class KontinuumEngine:
         Returns the consolidation stats dict if a cycle ran, else ``None``.
         """
         now_ts = datetime.now(timezone.utc).timestamp()
+        if self.association_cortex is not None:
+            self.association_cortex.tick(now_ts)
         if self.sleep_consolidation.should_consolidate(now_ts, self._last_event_ts):
             return self.sleep_consolidation.consolidate(
                 self.hippocampus, self.cerebellum,
@@ -744,7 +844,8 @@ class KontinuumEngine:
                      stn_brake: float = 0.0, stn_hold: bool = False,
                      interval_injected: Optional[int] = None,
                      now_ts: Optional[float] = None,
-                     house_transition_token: Optional[str] = None) -> Dict[str, Any]:
+                     house_transition_token: Optional[str] = None,
+                     legacy_predictions: Optional[List[Any]] = None) -> Dict[str, Any]:
         """Surface the rich module outputs that used to be discarded."""
         extra: Dict[str, Any] = {
             "house_transition": house_transition_token,
@@ -782,6 +883,19 @@ class KontinuumEngine:
             "bdnf_protected": self.bdnf.protected_count(),
             "interval_tracked": len(self.interval_timing.timers),
         }
+        if self.claustrum is not None:
+            ueberraschung = self.claustrum.letzte_ueberraschung
+            extra["claustrum"] = {
+                "ueberraschung_bits": (round(ueberraschung, 3)
+                                       if ueberraschung is not None else None),
+                "trefferquote": round(self.claustrum.trefferquote, 4),
+                "gewichte": self.claustrum.stats["gewichte"],
+            }
+            if legacy_predictions is not None:
+                extra["predictions_alt"] = [
+                    [self.thalamus.decode_token(p[0]), float(p[1]), float(p[2]), p[3]]
+                    for p in legacy_predictions[:5]
+                ]
         if interval_injected is not None:
             extra["interval_due_token"] = self.thalamus.decode_token(interval_injected)
         if fired_rule is not None:
@@ -846,6 +960,10 @@ class KontinuumEngine:
         # so SCHEMA_VERSION stays 1 — the layout grew, it didn't change shape).
         "habenula", "subthalamic", "suprachiasmatic", "serotonin",
         "acetylcholine", "cortisol", "bdnf", "interval_timing",
+        # Stufe 3 (additiv wie oben): Lagebild + Börse. Fehlen sie in einem
+        # älteren Gehirn, starten beide frisch — das Gelernte der übrigen
+        # Module bleibt.
+        "association_cortex", "claustrum",
     )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -853,6 +971,8 @@ class KontinuumEngine:
         modules = {}
         for name in self._PERSISTED_MODULES:
             mod = getattr(self, name)
+            if mod is None:
+                continue
             to_dict = getattr(mod, "to_dict", None)
             if callable(to_dict):
                 modules[name] = to_dict()
@@ -890,6 +1010,8 @@ class KontinuumEngine:
             if name not in modules:
                 continue
             mod = getattr(self, name)
+            if mod is None:
+                continue
             from_dict = getattr(mod, "from_dict", None)
             if callable(from_dict):
                 from_dict(modules[name])

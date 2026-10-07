@@ -1,5 +1,78 @@
 # Changelog
 
+## 0.7.0 (unreleased)
+
+Stufe 3 of the measuring track (lead ticket #2): the engine now beats every
+dumb opponent of the Messstand — on the simulation and on all five CASAS
+houses — where the old chain lost to a 1-gram Markov chain. Details, tables
+and the rationale are in `docs/MESSPROTOKOLL.md` §10.
+
+### Added
+
+- **Claustrum — the prediction market** (`claustrum.py`). Sequence
+  (variable-order Markov 1..3, Witten-Bell smoothed, no buckets), time habit
+  (weekday/weekend × hour ±1), follower per day section, the Lagebild and the
+  external voices (hippocampus, confident reflex) are mixed log-linearly; the
+  weights are learned online from what actually happened (log-likelihood
+  gradient, RMSprop; global plus per semantic of the last event). An expert
+  that does not help ends up near weight 0 and cannot do harm.
+  `snapshot.predictions` now come from it. Measured top-1, engine level:
+  simulation (4 seeds × 4 origins) classic **82.5** vs B2 56.2 (old chain
+  53.6), device house **93.5** vs 60.8 (83.6); CASAS (aruba, cairo, milan,
+  tulum1, tulum2) **+9.1 to +14.3 points over B2 at every origin**, +3.8 to
+  +11.5 over the old candidate list (taken before the ranking, its stronger
+  reading); top-3 76–89 % against 56–78 % for the old list. Calibration
+  (ECE of the top-1 confidence) 4–9 % against 13–50 %.
+- **AssociationCortex — the Lagebild** (`association_cortex.py`). The joint
+  state of all entities, fed *before* the thalamus: `unavailable` becomes the
+  state `weg` (tyre pressure sensors that drive away with the car), power
+  readings get learned device levels instead of fixed watt buckets (3 W
+  standby and 100 W on are both "low" for the thalamus). Every 5 min of event
+  time a pair table "all against all" (`zusammenhaenge()`, `p_gemeinsam()`);
+  presence inference for `person.*`/`device_tracker.*` targets from the
+  devices alone (Naive Bayes over states, durations and day sections,
+  stacked with the time habit, per-entity weights learned with AdaGrad, one
+  day delayed counting), with evidence (`engine.lagebild()`); and the Lage
+  expert for the Claustrum. Hosts can restrict the targets
+  (`AssociationCortex(ziel=...)`), e.g. to persons and their own trackers.
+- Host-neutral entry points `lage_setzen()` and `boersen_liste()`, used by
+  the engine and by ha-kontinuum alike.
+- `KontinuumEngine(claustrum=True, lagebild=True)`; `extra["claustrum"]`
+  (surprise in bits, hit rate, learned weights) and
+  `extra["predictions_alt"]` (the old candidate list, before/after in one
+  run). The Messstand reports it as the row `Engine alt`.
+- `benchmarks/spur/haushalt.py` (simulated two-person household with car,
+  TV, PC) and `benchmarks/spur/anwesenheit.py` (presence harness against
+  P0/P1/P2).
+
+### Changed
+
+- **Prediction and suggestion are separate.** The market predicts; what the
+  PFC suggests is still ranked with the user's feedback (habenula
+  suppression, accumbens bias, basal ganglia Q values) — now on the market's
+  candidates. `surprise`/`anomaly` are unchanged (hippocampus path): the
+  market's log loss is a worse anomaly score (AUC 0.73 vs 0.999).
+- Interval timing no longer votes ("overdue" means "soon", not "next");
+  an overdue cadence and a confident reflex the market does not already list
+  take at most the last place.
+- **Neurorhythms: the fixed circadian curve is off** (`CIRCADIAN_FEST =
+  False`, multiplier 1.0). Its trough sat at 20:00, not at night, and fed
+  with the wall-clock hour it made the same stream learn differently
+  depending on when it ran. Live-faithful anomaly benchmark: AUC 0.948,
+  P 0.36, R 0.25 before → 0.999, 1.00, 1.00 after. The engine passes the
+  event hour to `modulate_learning`. The learned inner clock
+  (suprachiasmatic) is unaffected.
+- Hippocampus eviction keeps exactly the same n-grams but uses `nsmallest`
+  instead of sorting the whole bucket (bit-identical; the full sort cost 20 %
+  of engine time on a dense house).
+
+### Persistence
+
+- `association_cortex` and `claustrum` are additive modules
+  (`SCHEMA_VERSION` stays 1): an older brain starts both fresh and keeps
+  everything else. Both store their open prediction state, so a restored
+  engine continues bit-identically.
+
 ## 0.6.3 (2026-07-22)
 
 ### Added

@@ -1,6 +1,6 @@
 # KONTINUUM Core — Modul-Referenz
 
-Die Engine vereint **26 neuro-inspirierte Module** in *einer* `observe()`-Pipeline.
+Die Engine vereint **28 neuro-inspirierte Module** in *einer* `observe()`-Pipeline.
 Alle sind reine Statistik/Arithmetik (kein ML), laufen in **~0 ms pro Event**,
 sind in der Größe begrenzt (laufen jahrelang auf einem Raspberry Pi) und werden
 über `to_dict()`/`from_dict()` persistiert.
@@ -30,6 +30,7 @@ Inhalt:
 | **Hypothalamus** (`hypothalamus.py`) | Homöostase | Absorbiert ~95 % der Energie-/Klima-Rauschevents, liefert einen 9-dim Kontext (Batterie, Solar, Verbrauch, Temperatur-Trends …) | Kontextvektor (9) | ✅ |
 | **Insula** (`insula.py`) | Interozeption | Erkennt **Modus**: `sleeping, waking_up, active, relaxing, cooking, away` (nutzt zirkadiane Priors) | `current_mode`, Modus-Kontext (3) | ✅ |
 | **Spatial Cortex** (`spatial_cortex.py`) | Raumwahrnehmung | Lernt Raum-Sequenzen (A → B), entprellt Präsenz (Hysterese/Confirm/Cooldown), liefert „entered <room>"-Tokens | Raumübergänge | ✅ |
+| **Assoziationskortex** (`association_cortex.py`, 0.7.0) | Assoziationsrinde | Das **Lagebild**: jede Entität in genau einem Zustand (`unavailable` → `weg`, Leistungen in gelernten Gerätestufen), alle 5 min eine **Paar-Tafel** „alle gegen alle“, **Anwesenheit** je `person`/`device_tracker` aus der Lage (Naive Bayes + Uhrzeit, Gewichte je Entität gelernt) und der Lage-Experte fürs Claustrum | `lagebild()`: Anwesenheit mit Belegen, Zusammenhänge | ✅ |
 | **Entorhinaler Cortex** (`entorhinal_cortex.py`) | Grid-/Übergangskarte | Lernt die Transitions-Map zwischen Räumen, sagt den nächsten Raum vorher, pruned selten genutzte Pfade (1×/Tag) | `predict_next_room()` | ✅ |
 
 ## 2. Gedächtnis & Vorhersage
@@ -39,6 +40,7 @@ Inhalt:
 | **Hippocampus** (`hippocampus.py`) | Episodisches Gedächtnis | Lernt Sequenzen als **1- bis 4-Gramm-Markov-Ketten** pro Kontext-Bucket; sagt Top-k nächste Tokens vorher | `predict()`-Liste | ✅ |
 | **Predictive Processing** (`predictive_processing.py`) | Prediction-Error | Berechnet **Surprise** (0–1) aus Vorhersage-Fehler + Neuheit; adaptive **Anomalie-Schwelle** (Median + MAD, robust); leitet das **Lerngewicht** ab | `surprise`, `anomaly_threshold`, `learn_weight` | ✅ |
 | **Cerebellum** (`cerebellum.py`) | Reflexe / Prozeduren | Extrahiert stabile Routinen als deterministische Regeln (kontext-bucket-bewusst), bildet **Chunks** (Mehrschritt-Prozeduren) | gefeuerte Regel | ✅ |
+| **Claustrum** (`claustrum.py`, 0.7.0) | „Dirigent“ der Rinde | Die **Börse der Vorhersagen**: Sequenz (Markov 1..3, Witten-Bell), Uhrzeit-Gewohnheit, Folge je Tagesabschnitt, Lagebild und externe Stimmen werden log-linear gemischt; die Gewichte lernt es aus dem, was eintrat. Ersetzt das feste Ranking (die alte Kette verlor gegen eine 1-Gramm-Kette) | `predictions`, `extra["claustrum"]` | ✅ |
 | **Interval Timing** (`interval_timing.py`) | Striatal-cerebelläre „Stoppuhr" | Lernt **Dauern zwischen Wiederholungen** (EMA des Intervalls + Streuung) und markiert eine regelmäßige Kadenz als **„fällig"** (z. B. „alle 4 Wochen"). Überfällige Kadenzen werden als Vorhersage injiziert | `due_score`, `due_prediction()` | ✅ |
 
 > **Wichtig:** *Interval Timing* ≠ *Suprachiasmatischer Nukleus*. Der SCN ist die
@@ -110,6 +112,10 @@ Hypothalamus  Serotonin   Nuc. Accumbens  STN (Hold)
    │           Cortisol
 Insula / Spatial / Entorhinal
 
+[Assoziationskortex]   → vor dem Thalamus: Lagebild aller Zustände (auch „weg“),
+                         Paar-Tafel, Anwesenheit mit Belegen
+[Claustrum]            → zwischen Cerebellum und PFC: die Börse mischt Sequenz,
+                         Uhrzeit, Lage, Hippocampus und Reflex nach Trefferbilanz
 [Sleep Consolidation]  → nachts/ruhig: Replay, Prune, Dream, Homöostase
 [Metaplastizität]      → alle 24 h: Lernraten aller Module
 [BDNF]                 → schützt bewährte Routinen vor dem Vergessen

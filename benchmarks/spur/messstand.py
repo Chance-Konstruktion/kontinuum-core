@@ -53,6 +53,11 @@ SYSTEME = ("Engine", "B0", "B1", "B2")
 #:                       gerankten Zeile zeigt, wo die Punkte hängen.
 ENGINE_ROH = "Engine roh"
 ENGINE_VOR_RANKING = "Engine vor Ranking"
+#: Seit dem Claustrum (06.10.2026) ist „Engine“ die Börse. Die alte,
+#: gerankte Kette läuft im selben Durchgang mit und steht als eigene
+#: Zeile daneben (``extra["predictions_alt"]``) — Vorher und Nachher in
+#: EINER Messung, gleicher Strom, gleiche Ursprünge.
+ENGINE_ALT = "Engine alt"
 
 
 @dataclass
@@ -251,6 +256,14 @@ class _Rohspion:
         return self._roh
 
 
+def _alt_vorhersage(snapshot) -> List[Tuple[str, float]]:
+    """Die alte gerankte Kette (``extra["predictions_alt"]``), wie sie
+    ohne Claustrum ``snapshot.predictions`` gewesen wäre. Leeres
+    Ereignis ⇒ leere Zeile."""
+    alt = (snapshot.extra or {}).get("predictions_alt") or []
+    return [(str(eintrag[0]), float(eintrag[2])) for eintrag in alt]
+
+
 def _pur_vorhersage(snapshot) -> List[Tuple[str, float]]:
     """Die „Hippocampus pur"-Zeile: die raw_predictions direkt aus dem
     Snapshot (extra["raw_predictions"], (token, prob, conf) decoded) —
@@ -307,11 +320,15 @@ def messe_ursprung(spur: Spur, train_wochen: int,
     engine = _gebaut()
     registriere_engine(engine, spur.kopf.entitaeten)
 
-    namen = list(SYSTEME) + ([ENGINE_ROH, ENGINE_VOR_RANKING]
-                             if rohliste else [])
+    mit_claustrum = getattr(engine, "claustrum", None) is not None
+    zweite_zeile = ENGINE_ALT if mit_claustrum else ENGINE_VOR_RANKING
+    namen = list(SYSTEME) + ([ENGINE_ROH, zweite_zeile] if rohliste else [])
     systeme = {name: Systembilanz(name) for name in namen}
     schar = gegner(vokabular)
-    spion = _Rohspion(engine) if rohliste else None
+    # Der Spion hängt am alten Ranking-Eingang; mit Claustrum wird dieser
+    # Weg nicht mehr gegangen, die alte Kette liest sich dann aus dem
+    # Snapshot (ENGINE_ALT).
+    spion = _Rohspion(engine) if (rohliste and not mit_claustrum) else None
 
     letzte_engine: List[Tuple[str, float]] = []
     letzte_pur: List[Tuple[str, float]] = []
@@ -339,9 +356,9 @@ def messe_ursprung(spur: Spur, train_wochen: int,
                 "B1": schar["B1"].vorhersage(zeit_davor, 3),
                 "B2": schar["B2"].vorhersage(zeit_davor, 3),
             }
-            if spion is not None:
+            if rohliste:
                 vorhersagen[ENGINE_ROH] = letzte_pur
-                vorhersagen[ENGINE_VOR_RANKING] = letzte_roh
+                vorhersagen[zweite_zeile] = letzte_roh
             for name, liste in vorhersagen.items():
                 bilanz = systeme[name]
                 if not liste:
@@ -386,6 +403,8 @@ def messe_ursprung(spur: Spur, train_wochen: int,
         letzte_pur = _pur_vorhersage(schnappschuss)
         if spion is not None:
             letzte_roh = spion.vorhersage()
+        elif mit_claustrum:
+            letzte_roh = _alt_vorhersage(schnappschuss)
         token_i = ziele[i]
         for name, g in schar.items():
             if name == "B1":
@@ -497,6 +516,7 @@ __all__ = [
     "SYSTEME",
     "ENGINE_ROH",
     "ENGINE_VOR_RANKING",
+    "ENGINE_ALT",
     "Systembilanz",
     "UrsprungsErgebnis",
     "MessErgebnis",
