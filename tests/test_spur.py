@@ -72,7 +72,8 @@ def _kopf_zeile(haus_typ: str = "klassisch") -> str:
 
 def _schreibe_zeilen(ordner: Path, zeilen) -> Path:
     pfad = ordner / "probe.jsonl"
-    pfad.write_text("\n".join(zeilen) + "\n", encoding="utf-8", newline="\n")
+    with pfad.open("w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(zeilen) + "\n")
     return pfad
 
 
@@ -325,7 +326,8 @@ def test_waechter_cli():
         assert "sensor." not in ausgabe and "light." not in ausgabe
 
         kaputt = Path(ordner) / "kaputt.jsonl"
-        kaputt.write_text("kein json\n", encoding="utf-8", newline="\n")
+        with kaputt.open("w", encoding="utf-8", newline="\n") as f:
+            f.write("kein json\n")
         puffer = io.StringIO()
         with contextlib.redirect_stdout(puffer), contextlib.redirect_stderr(puffer):
             assert pruefe_spur.main([str(kaputt)]) == 1
