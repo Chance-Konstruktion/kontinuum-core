@@ -258,18 +258,28 @@ class Hippocampus:
         Gestrichen werden die nach (Summe, N-Gramm) kleinsten — genau die
         Menge, die „absteigend sortieren, ab Platz K streichen“ trifft, aber
         ohne die ganze Liste zu sortieren: Meist ist der Eimer nur um ein bis
-        drei N-Gramme übergelaufen. (Profil auf CASAS Cairo: das volle
-        Sortieren kostete 20 % der Engine-Zeit.)"""
+        drei N-Gramme übergelaufen.
+
+        Die Summe kommt aus ``totals`` statt aus ``sum(v.values())``.
+        ``totals[ngram]`` wird in :meth:`learn` mit demselben Gewicht
+        gepflegt wie die Einzelziele und in :meth:`_apply_decay` mit
+        demselben Faktor skaliert — die Summe steht also längst da, und
+        sie je Auslagerung für alle ~1000 N-Gramme neu zu rechnen war
+        der teuerste Posten der Auslagerung (Profil 6c auf aruba:
+        6641 Auslagerungen, 7,8 Mio. ``sum``-Aufrufe, ~10 % der
+        Profilzeit). Dass die gestrichene Menge dieselbe bleibt, ist
+        nicht behauptet, sondern gemessen: der Zustands-Fingerabdruck
+        des Hippocampus ist nach 15 000 Ereignissen (aruba, Saat 0)
+        mit und ohne diese Zeile identisch (``7136c9b6…``)."""
         trans = self.transitions[bucket]
         tots = self.totals[bucket]
         zuviel = len(trans) - self.MAX_NGRAMS_PER_BUCKET
         if zuviel <= 0:
             return
-        scored = [(sum(v.values()), ng) for ng, v in trans.items()]
+        scored = ((tots.get(ng, 0.0), ng) for ng in trans)
         for _, ngram in heapq.nsmallest(zuviel, scored):
             del trans[ngram]
-            if ngram in tots:
-                del tots[ngram]
+            tots.pop(ngram, None)
 
     def _evict_durations(self):
         """Bound the duration map: keep the most-observed token-pairs."""
