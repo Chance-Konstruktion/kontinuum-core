@@ -270,7 +270,13 @@ class Hippocampus:
         Profilzeit). Dass die gestrichene Menge dieselbe bleibt, ist
         nicht behauptet, sondern gemessen: der Zustands-Fingerabdruck
         des Hippocampus ist nach 15 000 Ereignissen (aruba, Saat 0)
-        mit und ohne diese Zeile identisch (``7136c9b6…``)."""
+        mit und ohne diese Zeile identisch (``7136c9b6…``).
+
+        Damit die Gleichung auch dann exakt gilt, wenn der Decay-Pruning
+        feuert, zieht :meth:`_apply_decay` die Masse gestrichener Ziele
+        von ``totals`` ab (Kimis Befund auf MR !16: sonst wöge die
+        Auslagerung den toten Schweif mit — live nachgestellt, 6 von 14
+        N-Grammen wichen ab; mit dem Abzug: keines)."""
         trans = self.transitions[bucket]
         tots = self.totals[bucket]
         zuviel = len(trans) - self.MAX_NGRAMS_PER_BUCKET
@@ -435,12 +441,20 @@ class Hippocampus:
             tots = self.totals[bucket]
             for ngram in list(trans):
                 targets = trans[ngram]
+                gestrichen = 0.0
                 for token in list(targets):
                     targets[token] *= factor
                     if targets[token] < self.DECAY_PRUNE_THRESHOLD:
+                        gestrichen += targets[token]
                         del targets[token]
                 if ngram in tots:
                     tots[ngram] *= factor
+                    # Die Masse gestrichener Ziele darf im Summenbuch nicht
+                    # weiterleben: die Auslagerung liest die Summe aus
+                    # `totals` und wöge sonst den toten Schweif mit (Kimis
+                    # Befund auf MR !16). So bleibt `totals[ngram]` genau
+                    # die Summe der lebenden Ziele.
+                    tots[ngram] -= gestrichen
                 if not targets:
                     del trans[ngram]
                     tots.pop(ngram, None)
