@@ -55,7 +55,7 @@ def main() -> int:
     p.add_argument("--daten", required=True,
                    help="Ordner mit <haus>.jsonl (CASAS-Spuren)")
     p.add_argument("--ziel", required=True,
-                   help="Ordner fuer tafel_<stand>.{json,txt,log}")
+                   help="Ordner fuer tafel_<stand>.{json,txt}")
     p.add_argument("stand", help="Etikett des Stands (Commit-Kurzhash)")
     args = p.parse_args()
 
@@ -74,6 +74,16 @@ def main() -> int:
         tage = (spur.ereignisse[-1].ts - spur.ereignisse[0].ts).days + 1
         wochen = tage // 7
         ks = ursprungs_satz(wochen)
+        if not ks:
+            # Weniger als 5 Wochen: kein Ursprung nach der Regel (4..W-1).
+            # Frueher lief hier statistics.median([]) in den Fehler; jetzt
+            # wird das Haus mit Hinweis uebersprungen (Claudes Abnahme
+            # 16600, Punkt 1) — die Zeile steht auch im Klartextbericht.
+            print(f"### {haus}: {len(spur.ereignisse)} Ereignisse, {wochen} "
+                  f"Wochen — weniger als 5, uebersprungen.", flush=True)
+            zeilen.append(f"{haus:>7}: nur {wochen} Wochen — kein Ursprung "
+                          "möglich, übersprungen.")
+            continue
         print(f"### {haus}: {len(spur.ereignisse)} Ereignisse, {wochen} Wochen, "
               f"Ursprünge {ks}", flush=True)
         eintrag = {"ereignisse": len(spur.ereignisse), "wochen": wochen,
@@ -112,12 +122,21 @@ def main() -> int:
         eintrag["minuten"] = (time.time() - t0) / 60
         tafel["haeuser"][haus] = eintrag
         med = eintrag["median"]
-        zweite = ENGINE_VOR_RANKING if ENGINE_VOR_RANKING in med else "Engine alt"
+        # Je nach Stand traegt der Messstand „vor Ranking" oder „Engine
+        # alt"; fehlt beides, wird kein Wert erfunden (Claudes Abnahme
+        # 16600, Punkt 2) — dann steht dort ein Gedankenstrich.
+        if ENGINE_VOR_RANKING in med:
+            zweite = ENGINE_VOR_RANKING
+        elif "Engine alt" in med:
+            zweite = "Engine alt"
+        else:
+            zweite = None
+        zweite_text = f"{zweite} {med[zweite]:.1%}" if zweite else "—"
         zeilen.append(
             f"{haus:>7} (W={wochen:>2}, {len(ks)} Ursprünge, "
             f"{eintrag['minuten']:.0f} min)\n"
             f"   Median Top-1: Engine {med.get('Engine', 0):.1%} | "
-            f"{zweite} {med.get(zweite, 0):.1%} | "
+            f"{zweite_text} | "
             f"pur {med.get(ENGINE_ROH, 0):.1%} | B0 {med.get('B0', 0):.1%} | "
             f"B1 {med.get('B1', 0):.1%} | B2 {med.get('B2', 0):.1%}\n"
             f"   gepaart Engine−B2 {eintrag['gepaart_engine_b2']['median']:+.1%} "
