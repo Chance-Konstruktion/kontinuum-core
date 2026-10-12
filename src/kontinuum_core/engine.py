@@ -44,6 +44,7 @@ pruning) runs inline on a coarse cadence.
 
 from __future__ import annotations
 
+import random
 import time
 import logging
 from dataclasses import dataclass, field
@@ -162,7 +163,21 @@ class KontinuumEngine:
         self.cerebellum = Cerebellum()
         self.basal_ganglia = BasalGanglia()
         self.neurorhythms = Neurorhythms()
-        self.sleep_consolidation = SleepConsolidation()
+        # FLUG 2732 (claudes Weg 2, Notiz 17474): DER GESÄTE TRAUM-REPLAY.
+        # Die Engine reicht SleepConsolidation einen eigenen, gesäten
+        # random.Random hinein — die Saat kommt aus der Konfiguration
+        # (``rng_seed``, fester Standard 0): ein Lauf je Saat ist
+        # deterministisch, und der Kern fasst das GLOBALE random-Modul
+        # nie mehr an. Die wackelnde Wache (Flug 2730/17464 — die
+        # Flagge kippte am UNGESÄTEN Dream-Replay
+        # ``sleep_consolidation.py:60``, nie an der Uhr) ruht damit
+        # ohne Münze. ``rng_seed: None`` säht aus der Maschine
+        # (nicht deterministisch, ehrlich benannt); die bestehenden
+        # ``_rng``-Patches (benchmarks/replay.py, benchmarks/spur/
+        # messstand.py, die Tests — alle Saat 0) bleiben semantisch
+        # identisch: sie überschreiben dieselbe Saat.
+        _traum_saat = self.config.get("rng_seed", 0)
+        self.sleep_consolidation = SleepConsolidation(rng=random.Random(_traum_saat))
         self.amygdala = Amygdala()
         self.insula = Insula()
         self.hypothalamus = Hypothalamus(clock=self._clock)
