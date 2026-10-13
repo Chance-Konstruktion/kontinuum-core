@@ -1,6 +1,26 @@
 # Changelog
 
-## 0.7.0 (unreleased)
+## 0.7.1
+
+Maintenance release on top of 0.7.0 — no new organ, two bookkeeping fixes and
+the dream replay.
+
+### Fixed
+
+- **Hippocampus totals stay exact.** Decay pruning now subtracts the removed
+  mass from `totals`, and eviction reads the sum from `totals` instead of
+  summing every n-gram (Kimi's finding, MR !16; regression test
+  `test_decay_prune_totals.py`).
+
+### Added
+
+- **Seeded dream replay** (`engine.py`, `test_traum_saat.py`): the replay is
+  reproducible from a seed. ha-kontinuum and kontinuum-ai-anomaly read
+  `traum_gesaet` from core ≥ 0.7.1.
+- **Benchmark board tool** `benchmarks/spur/tafel_lauf.py`: five houses, time
+  cues on, fixed origins.
+
+## 0.7.0
 
 Stufe 3 of the measuring track (lead ticket #2): the engine now beats every
 dumb opponent of the Messstand — on the simulation and on all five CASAS
