@@ -79,7 +79,7 @@ class LocusCoeruleus:
                    and now - self._fenster[0] > self.WINDOW_SECONDS):
                 self._fenster.popleft()
             if (verdraengt is not None
-                    and verdraengt >= now - self.WINDOW_SECONDS):
+                    and now - verdraengt <= self.WINDOW_SECONDS):
                 # Das Verdraengte liegt noch im Fenster und ist dort
                 # beweisbar vorhanden (Fenster = Bestandsformel ueber
                 # events). Faellt die Annahme je, ist der Neuaufbau die

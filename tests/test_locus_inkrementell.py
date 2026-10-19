@@ -141,6 +141,18 @@ def test_verdraengtes_im_fenster_wird_gestrichen():
                 name="kapazitaet")
 
 
+def test_verdraengtes_genau_auf_der_gleitkomma_grenze():
+    """Kleine Zeitwerte: ``now - t <= W`` ist wahr, ``t >= now - W`` aber
+    falsch (Rundung). Das verdraengte Element liegt laut Bestand noch im
+    Fenster und muss gestrichen werden. Die Pflege prueft deshalb in
+    derselben Form wie der Bestand (Durchsicht !21)."""
+    t0 = 1.27229304967304
+    now = 11.27229304967304
+    assert now - t0 <= 10 and not t0 >= now - 10   # die Grenze selbst
+    _vergleiche([t0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, now], klein=True,
+                name="gleitkomma-grenze")
+
+
 def test_nicht_endliche_zeit_wie_bestand():
     """NaN/inf koennen ueber die Engine nicht entstehen (der Zeitstempel
     kommt aus datetime), aber wer die Klasse direkt ruft, soll dasselbe
