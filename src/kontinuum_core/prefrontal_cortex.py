@@ -43,6 +43,11 @@ STATE_TO_SERVICE = {
     "vacuum": {"on": "start", "off": "return_to_base"},
 }
 
+# Token semantics are engine concepts, not necessarily Home Assistant domains.
+# Media is represented as ``media`` in learned tokens but services live under
+# the real Home Assistant ``media_player`` domain.
+SERVICE_DOMAIN_BY_SEMANTIC = {"media": "media_player"}
+
 
 class Decision:
     """Eine Entscheidung des PFC."""
@@ -197,7 +202,7 @@ class PrefrontalCortex:
         if semantic == "climate" and state != "off":
             data["hvac_mode"] = state
         return {
-            "domain": semantic,
+            "domain": SERVICE_DOMAIN_BY_SEMANTIC.get(semantic, semantic),
             "service": service,
             "entity_id": decision.entity_id,
             "data": data,
