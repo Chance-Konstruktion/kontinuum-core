@@ -63,3 +63,39 @@ def test_engine_snapshot_decision_preserves_token_id():
     extra = engine._build_extra([], None, decision, 0.2, 0.0)
 
     assert extra["decision"]["token_id"] == 42
+
+
+
+def test_climate_service_maps_real_home_assistant_hvac_modes():
+    pfc = PrefrontalCortex(amygdala=None)
+    for state, hvac_mode in (
+        ("heat", "heat"),
+        ("cool", "cool"),
+        ("heat_cool", "heat_cool"),
+        ("auto", "auto"),
+        ("dry", "dry"),
+        ("fan_only", "fan_only"),
+        ("heating", "heat"),
+        ("cooling", "cool"),
+    ):
+        decision = _decision(f"living_room.climate.{state}", "climate.living_room")
+        call = pfc.get_service_call(decision)
+
+        assert call["domain"] == "climate"
+        assert call["service"] == "set_hvac_mode"
+        assert call["data"] == {
+            "entity_id": "climate.living_room",
+            "hvac_mode": hvac_mode,
+        }
+
+
+def test_climate_off_uses_turn_off_without_hvac_mode():
+    pfc = PrefrontalCortex(amygdala=None)
+    decision = _decision("living_room.climate.off", "climate.living_room")
+
+    assert pfc.get_service_call(decision) == {
+        "domain": "climate",
+        "service": "turn_off",
+        "entity_id": "climate.living_room",
+        "data": {"entity_id": "climate.living_room"},
+    }

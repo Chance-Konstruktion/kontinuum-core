@@ -39,10 +39,26 @@ STATE_TO_SERVICE = {
     "fan": {"on": "turn_on", "off": "turn_off"},
     "media": {"playing": "media_play", "paused": "media_pause", "off": "turn_off"},
     "cover": {"open": "open_cover", "closed": "close_cover"},
-    "climate": {"heating": "set_hvac_mode", "cooling": "set_hvac_mode", "off": "turn_off"},
+    "climate": {
+        "heat": "set_hvac_mode",
+        "cool": "set_hvac_mode",
+        "heat_cool": "set_hvac_mode",
+        "auto": "set_hvac_mode",
+        "dry": "set_hvac_mode",
+        "fan_only": "set_hvac_mode",
+        # Legacy / custom semantic spellings are normalized below to HA's
+        # actual hvac_mode values.
+        "heating": "set_hvac_mode",
+        "cooling": "set_hvac_mode",
+        "off": "turn_off",
+    },
     "automation": {"on": "turn_on"},
     "vacuum": {"on": "start", "off": "return_to_base"},
 }
+
+# Home Assistant climate states may be used directly as learned tokens. Keep
+# the old descriptive spellings readable, but send valid HA hvac_mode values.
+CLIMATE_HVAC_MODE_BY_STATE = {"heating": "heat", "cooling": "cool"}
 
 # Token semantics are engine concepts, not necessarily Home Assistant domains.
 # Media is represented as ``media`` in learned tokens but services live under
@@ -202,7 +218,7 @@ class PrefrontalCortex:
             return None
         data = {"entity_id": decision.entity_id}
         if semantic == "climate" and state != "off":
-            data["hvac_mode"] = state
+            data["hvac_mode"] = CLIMATE_HVAC_MODE_BY_STATE.get(state, state)
         return {
             "domain": SERVICE_DOMAIN_BY_SEMANTIC.get(semantic, semantic),
             "service": service,
