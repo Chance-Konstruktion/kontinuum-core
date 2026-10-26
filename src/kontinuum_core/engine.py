@@ -924,6 +924,7 @@ class KontinuumEngine:
         if decision is not None:
             extra["decision"] = {
                 "token": decision.token,
+                "token_id": decision.token_id,
                 "entity_id": decision.entity_id,
                 "stage": decision.stage,
                 "confidence": round(decision.confidence, 3),

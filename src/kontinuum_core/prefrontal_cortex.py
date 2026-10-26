@@ -19,6 +19,7 @@
 
 import logging
 import time
+from uuid import uuid4
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -72,6 +73,7 @@ class Decision:
     def to_dict(self):
         return {
             "token": self.token,
+            "token_id": self.token_id,
             "entity_id": self.entity_id,
             "confidence": self.confidence,
             "utility": self.utility,
@@ -301,7 +303,10 @@ class PrefrontalCortex:
 
     def queue_confirm(self, decision: Decision, reasoning: str = "",
                       context: dict = None) -> str:
-        confirm_id = f"c_{int(time.time())}_{decision.token_id}"
+        # Pending confirmations are keyed by ID. Timestamp + token alone can
+        # collide for same-second decisions (and the same token can belong to
+        # more than one entity), so give every confirmation an independent ID.
+        confirm_id = f"c_{uuid4().hex}"
         self._pending_confirms[confirm_id] = {
             "decision": decision,
             "timestamp": time.time(),
