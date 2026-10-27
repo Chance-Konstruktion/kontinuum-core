@@ -19,6 +19,7 @@
 
 import logging
 import time
+from uuid import uuid4
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -38,10 +39,31 @@ STATE_TO_SERVICE = {
     "fan": {"on": "turn_on", "off": "turn_off"},
     "media": {"playing": "media_play", "paused": "media_pause", "off": "turn_off"},
     "cover": {"open": "open_cover", "closed": "close_cover"},
-    "climate": {"heating": "set_hvac_mode", "cooling": "set_hvac_mode", "off": "turn_off"},
+    "climate": {
+        "heat": "set_hvac_mode",
+        "cool": "set_hvac_mode",
+        "heat_cool": "set_hvac_mode",
+        "auto": "set_hvac_mode",
+        "dry": "set_hvac_mode",
+        "fan_only": "set_hvac_mode",
+        # Legacy / custom semantic spellings are normalized below to HA's
+        # actual hvac_mode values.
+        "heating": "set_hvac_mode",
+        "cooling": "set_hvac_mode",
+        "off": "turn_off",
+    },
     "automation": {"on": "turn_on"},
     "vacuum": {"on": "start", "off": "return_to_base"},
 }
+
+# Home Assistant climate states may be used directly as learned tokens. Keep
+# the old descriptive spellings readable, but send valid HA hvac_mode values.
+CLIMATE_HVAC_MODE_BY_STATE = {"heating": "heat", "cooling": "cool"}
+
+# Token semantics are engine concepts, not necessarily Home Assistant domains.
+# Media is represented as ``media`` in learned tokens but services live under
+# the real Home Assistant ``media_player`` domain.
+SERVICE_DOMAIN_BY_SEMANTIC = {"media": "media_player"}
 
 
 class Decision:
@@ -67,6 +89,7 @@ class Decision:
     def to_dict(self):
         return {
             "token": self.token,
+            "token_id": self.token_id,
             "entity_id": self.entity_id,
             "confidence": self.confidence,
             "utility": self.utility,
@@ -195,9 +218,9 @@ class PrefrontalCortex:
             return None
         data = {"entity_id": decision.entity_id}
         if semantic == "climate" and state != "off":
-            data["hvac_mode"] = state
+            data["hvac_mode"] = CLIMATE_HVAC_MODE_BY_STATE.get(state, state)
         return {
-            "domain": semantic,
+            "domain": SERVICE_DOMAIN_BY_SEMANTIC.get(semantic, semantic),
             "service": service,
             "entity_id": decision.entity_id,
             "data": data,
@@ -296,7 +319,10 @@ class PrefrontalCortex:
 
     def queue_confirm(self, decision: Decision, reasoning: str = "",
                       context: dict = None) -> str:
-        confirm_id = f"c_{int(time.time())}_{decision.token_id}"
+        # Pending confirmations are keyed by ID. Timestamp + token alone can
+        # collide for same-second decisions (and the same token can belong to
+        # more than one entity), so give every confirmation an independent ID.
+        confirm_id = f"c_{uuid4().hex}"
         self._pending_confirms[confirm_id] = {
             "decision": decision,
             "timestamp": time.time(),
