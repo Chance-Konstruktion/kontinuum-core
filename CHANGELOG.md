@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.7.2
+
+Maintenance release: contract fixes for the Home Assistant adapters
+(ha-kontinuum, Lite) plus one performance change in the Locus Coeruleus.
+
+### Fixed
+
+- **Confirmation IDs are collision-free.** `queue_confirm` now uses an
+  independent random ID (`c_<uuid4 hex>`) instead of `time + token_id`, so two
+  decisions in the same second (or the same token on two entities) no longer
+  overwrite each other in the pending list. `Decision.to_dict()` and the
+  engine's decision snapshot now carry `token_id`.
+- **Native HA HVAC modes.** The climate service mapping understands the real
+  Home Assistant HVAC modes, and `off` uses `turn_off` without an `hvac_mode`.
+- **Media semantics.** Learned media semantics map to the `media_player`
+  service domain instead of the entity's source domain.
+
+### Changed
+
+- **Locus Coeruleus keeps its 60 s window incrementally** (O(1) per event);
+  pruning uses the same form as before (`now - t <= W`). A regression test
+  compares it against the old formula as oracle (`test_locus_inkrementell.py`).
+
 ## 0.7.1
 
 Maintenance release on top of 0.7.0 — no new organ, two bookkeeping fixes and
