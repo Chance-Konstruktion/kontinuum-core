@@ -51,6 +51,21 @@ def test_confirmation_ids_do_not_collide_for_same_second_and_token():
     assert pfc.peek_pending_confirm(second_id)["decision"] is second
 
 
+def test_confirmation_ids_differ_with_frozen_clock(monkeypatch):
+    from kontinuum_core import prefrontal_cortex as pc
+
+    monkeypatch.setattr(pc.time, "time", lambda: 1_700_000_000.0)
+    pfc = PrefrontalCortex(amygdala=None)
+    first = _decision("a.on", "light.a", token_id=7)
+    second = _decision("a.on", "light.a", token_id=7)
+
+    first_id = pfc.queue_confirm(first)
+    second_id = pfc.queue_confirm(second)
+
+    assert first_id != second_id
+    assert len(pfc._pending_confirms) == 2
+
+
 def test_decision_dict_preserves_token_id():
     decision = _decision("kitchen.light.on", "light.kitchen", token_id=42)
     assert decision.to_dict()["token_id"] == 42
