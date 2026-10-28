@@ -9,7 +9,7 @@ on:
 
 jobs:
   pytest:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -34,7 +34,7 @@ jobs:
     # Runs the replay benchmark as a visible, tracked quality metric on every
     # push/PR. Prints the report (mean surprise, AUC, anomaly-flag P/R/F1) and
     # fails if the engine's anomaly separation collapses (AUC <= 0.5).
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
